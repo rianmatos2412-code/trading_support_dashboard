@@ -178,7 +178,7 @@ class ConfluenceFactor(Base):
     factor_type = Column(String(20), nullable=False, index=True)
     factor_value = Column(Numeric(20, 8), nullable=True)
     factor_score = Column(Integer, default=0)  # 0-100
-    metadata = Column(Text, nullable=True)  # JSON string
+    metadata_json = Column(Text, nullable=True)  # JSON string
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

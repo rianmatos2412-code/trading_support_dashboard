@@ -10,7 +10,7 @@ CREATE EXTENSION IF NOT EXISTS timescaledb;
 
 -- OHLCV Candles (time-series)
 CREATE TABLE ohlcv_candles (
-    id BIGSERIAL PRIMARY KEY,
+    id BIGSERIAL,
     symbol VARCHAR(20) NOT NULL,
     timeframe VARCHAR(10) NOT NULL,
     timestamp TIMESTAMPTZ NOT NULL,
@@ -20,7 +20,7 @@ CREATE TABLE ohlcv_candles (
     close DECIMAL(20, 8) NOT NULL,
     volume DECIMAL(30, 8) NOT NULL,
     created_at TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE(symbol, timeframe, timestamp)
+    PRIMARY KEY (symbol, timeframe, timestamp)
 );
 
 -- Convert to hypertable for time-series optimization
@@ -34,7 +34,7 @@ CREATE INDEX idx_ohlcv_symbol_timestamp ON ohlcv_candles(symbol, timestamp DESC)
 
 -- Market Data (Open Interest, CVD, etc.)
 CREATE TABLE market_data (
-    id BIGSERIAL PRIMARY KEY,
+    id BIGSERIAL,  -- Keep it, but NOT as primary key
     symbol VARCHAR(20) NOT NULL,
     timestamp TIMESTAMPTZ NOT NULL,
     open_interest DECIMAL(30, 8),
@@ -45,7 +45,7 @@ CREATE TABLE market_data (
     price DECIMAL(20, 8),
     circulating_supply DECIMAL(30, 2),
     created_at TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE(symbol, timestamp)
+    PRIMARY KEY (symbol, timestamp)
 );
 
 SELECT create_hypertable('market_data', 'timestamp',
@@ -78,15 +78,15 @@ CREATE INDEX idx_asset_info_symbol ON asset_info(symbol);
 
 -- Swing Highs and Lows
 CREATE TABLE swing_points (
-    id BIGSERIAL PRIMARY KEY,
+    id BIGSERIAL,  -- keep but not PK
     symbol VARCHAR(20) NOT NULL,
     timeframe VARCHAR(10) NOT NULL,
     timestamp TIMESTAMPTZ NOT NULL,
     price DECIMAL(20, 8) NOT NULL,
     type VARCHAR(10) NOT NULL CHECK (type IN ('swing_high', 'swing_low')),
-    strength INTEGER DEFAULT 1, -- Number of candles on each side
+    strength INTEGER DEFAULT 1,
     created_at TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE(symbol, timeframe, timestamp, type)
+    PRIMARY KEY (symbol, timeframe, timestamp, type)
 );
 
 SELECT create_hypertable('swing_points', 'timestamp',
@@ -116,7 +116,7 @@ CREATE INDEX idx_sr_active ON support_resistance(is_active, symbol, timeframe);
 
 -- Fibonacci Levels
 CREATE TABLE fibonacci_levels (
-    id BIGSERIAL PRIMARY KEY,
+    id BIGSERIAL,
     symbol VARCHAR(20) NOT NULL,
     timeframe VARCHAR(10) NOT NULL,
     timestamp TIMESTAMPTZ NOT NULL,
@@ -133,7 +133,8 @@ CREATE TABLE fibonacci_levels (
     fib_0_90 DECIMAL(20, 8),
     fib_1 DECIMAL(20, 8) NOT NULL,
     direction VARCHAR(10) NOT NULL CHECK (direction IN ('long', 'short')),
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (symbol, timeframe, timestamp)
 );
 
 SELECT create_hypertable('fibonacci_levels', 'timestamp',
@@ -148,10 +149,10 @@ CREATE INDEX idx_fib_symbol_timeframe ON fibonacci_levels(symbol, timeframe, tim
 
 -- Trading Signals (main output table)
 CREATE TABLE trading_signals (
-    id BIGSERIAL PRIMARY KEY,
+    id BIGSERIAL,
     symbol VARCHAR(20) NOT NULL,
     timestamp TIMESTAMPTZ NOT NULL,
-    market_score INTEGER NOT NULL CHECK (market_score >= 0 AND market_score <= 100),
+    market_score INTEGER NOT NULL CHECK (market_score BETWEEN 0 AND 100),
     direction VARCHAR(10) NOT NULL CHECK (direction IN ('long', 'short')),
     price DECIMAL(20, 8) NOT NULL,
     entry1 DECIMAL(20, 8),
@@ -164,14 +165,14 @@ CREATE TABLE trading_signals (
     swing_low DECIMAL(20, 8),
     support_level DECIMAL(20, 8),
     resistance_level DECIMAL(20, 8),
-    confluence TEXT, -- JSON array of confluence factors: ['OB', 'SR', 'RSI']
+    confluence TEXT,
     risk_reward_ratio DECIMAL(10, 4),
     pullback_detected BOOLEAN DEFAULT FALSE,
     pullback_start_level DECIMAL(20, 8),
     approaching_fib_level DECIMAL(20, 8),
     confidence_score DECIMAL(5, 2),
     created_at TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE(symbol, timestamp)
+    PRIMARY KEY (symbol, timestamp)
 );
 
 SELECT create_hypertable('trading_signals', 'timestamp',
@@ -184,14 +185,15 @@ CREATE INDEX idx_signals_score ON trading_signals(market_score DESC);
 
 -- Confluence Factors
 CREATE TABLE confluence_factors (
-    id BIGSERIAL PRIMARY KEY,
+    id BIGSERIAL,
     symbol VARCHAR(20) NOT NULL,
     timestamp TIMESTAMPTZ NOT NULL,
-    factor_type VARCHAR(20) NOT NULL, -- 'OB', 'SR', 'RSI', 'FIB', etc.
+    factor_type VARCHAR(20) NOT NULL,
     factor_value DECIMAL(20, 8),
-    factor_score INTEGER DEFAULT 0 CHECK (factor_score >= 0 AND factor_score <= 100),
+    factor_score INTEGER DEFAULT 0 CHECK (factor_score BETWEEN 0 AND 100),
     metadata JSONB,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (symbol, timestamp, factor_type)
 );
 
 SELECT create_hypertable('confluence_factors', 'timestamp',
@@ -264,7 +266,7 @@ ORDER BY symbol, timestamp DESC;
 CREATE OR REPLACE FUNCTION get_latest_signal(p_symbol VARCHAR(20))
 RETURNS TABLE (
     symbol VARCHAR(20),
-    timestamp TIMESTAMPTZ,
+    signal_ts TIMESTAMPTZ,
     market_score INTEGER,
     direction VARCHAR(10),
     price DECIMAL(20, 8),
@@ -279,7 +281,7 @@ BEGIN
     RETURN QUERY
     SELECT 
         ts.symbol,
-        ts.timestamp,
+        ts."timestamp" AS signal_ts,
         ts.market_score,
         ts.direction,
         ts.price,
@@ -291,8 +293,29 @@ BEGIN
         ts.confluence
     FROM trading_signals ts
     WHERE ts.symbol = p_symbol
-    ORDER BY ts.timestamp DESC
+    ORDER BY ts."timestamp" DESC
     LIMIT 1;
 END;
 $$ LANGUAGE plpgsql;
+
+-- ============================================================================
+-- GRANT PERMISSIONS
+-- ============================================================================
+
+-- Grant schema permissions
+GRANT USAGE ON SCHEMA public TO trading_user;
+
+-- Grant table permissions (all tables)
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO trading_user;
+
+-- Grant sequence permissions (for auto-increment IDs)
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO trading_user;
+
+-- Grant function permissions
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO trading_user;
+
+-- Set default privileges for future tables/sequences/functions
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO trading_user;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO trading_user;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT EXECUTE ON FUNCTIONS TO trading_user;
 

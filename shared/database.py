@@ -3,7 +3,7 @@ Database connection and session management
 """
 import os
 from typing import Generator
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import NullPool
 import logging
@@ -45,7 +45,7 @@ def init_db():
     try:
         # Test connection
         with engine.connect() as conn:
-            conn.execute("SELECT 1")
+            conn.execute(text("SELECT 1"))
         logger.info("Database connection established")
         return True
     except Exception as e:

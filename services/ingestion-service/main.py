@@ -172,8 +172,7 @@ class BinanceIngestionService:
                 market_data = MarketData(
                     symbol=symbol,
                     timestamp=datetime.now(),
-                    price=float(ticker.get("lastPrice", 0)),
-                    volume=float(ticker.get("volume", 0))
+                    price=float(ticker.get("lastPrice", 0))
                 )
                 db.merge(market_data)
                 db.commit()
