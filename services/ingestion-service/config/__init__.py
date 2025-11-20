@@ -1,0 +1,20 @@
+"""Configuration module for ingestion service"""
+from .settings import IngestionSettings, settings, DEFAULT_SYMBOLS, DEFAULT_TIMEFRAME, BINANCE_API_URL, COINGECKO_API_URL, MARKET_DATA_LIMIT, SYMBOL_LIMIT, WS_BATCH_SIZE, WS_BATCH_TIMEOUT, WS_MAX_RECONNECT_DELAY, WS_PING_INTERVAL, WS_PING_TIMEOUT, DB_BATCH_SIZE
+
+__all__ = [
+    'IngestionSettings',
+    'settings',
+    'DEFAULT_SYMBOLS',
+    'DEFAULT_TIMEFRAME',
+    'BINANCE_API_URL',
+    'COINGECKO_API_URL',
+    'MARKET_DATA_LIMIT',
+    'SYMBOL_LIMIT',
+    'WS_BATCH_SIZE',
+    'WS_BATCH_TIMEOUT',
+    'WS_MAX_RECONNECT_DELAY',
+    'WS_PING_INTERVAL',
+    'WS_PING_TIMEOUT',
+    'DB_BATCH_SIZE',
+]
+
