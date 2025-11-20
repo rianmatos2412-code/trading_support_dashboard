@@ -4,7 +4,7 @@ Binance ingestion service for fetching market data from Binance Futures API
 import sys
 import os
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Dict, Optional, Set
 import aiohttp
 from sqlalchemy.orm import Session
@@ -21,6 +21,7 @@ from shared.redis_client import publish_event
 # Import from local modules (relative to ingestion-service root)
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from utils.circuit_breaker import AsyncCircuitBreaker
+from utils.rate_limiter import BINANCE_RATE_LIMIT, BINANCE_BURST_LIMIT
 from config.settings import BINANCE_API_URL, DEFAULT_TIMEFRAME, SYMBOL_LIMIT
 from database.repository import get_or_create_symbol_record, get_timeframe_id
 
@@ -50,9 +51,19 @@ class BinanceIngestionService:
         self, 
         symbol: str, 
         interval: str = "1h", 
-        limit: int = 500
+        limit: int = 500,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None
     ) -> List[List]:
-        """Internal implementation of fetch_klines"""
+        """Internal implementation of fetch_klines with rate limiting
+        
+        Args:
+            symbol: Trading symbol
+            interval: Timeframe interval
+            limit: Maximum number of candles (max 1000)
+            start_time: Optional start time for historical data
+            end_time: Optional end time for historical data
+        """
         url = f"{self.base_url}/fapi/v1/klines"
         params = {
             "symbol": symbol,
@@ -60,40 +71,62 @@ class BinanceIngestionService:
             "limit": limit
         }
         
-        async with self.session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=30)) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    logger.info(
-                        "klines_fetched",
-                        symbol=symbol,
-                        interval=interval,
-                        count=len(data),
-                        limit=limit
-                    )
-                    return data
-                else:
-                    logger.error(
-                        "klines_fetch_failed",
-                        symbol=symbol,
-                        interval=interval,
-                        status_code=response.status
-                    )
-                    response.raise_for_status()
-                    return []
+        # Add time range parameters if provided
+        if start_time:
+            # Convert datetime to milliseconds timestamp
+            params["startTime"] = int(start_time.timestamp() * 1000)
+        if end_time:
+            params["endTime"] = int(end_time.timestamp() * 1000)
+        
+        # Apply rate limiting
+        async with BINANCE_RATE_LIMIT:
+            async with BINANCE_BURST_LIMIT:
+                async with self.session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        logger.info(
+                            "klines_fetched",
+                            symbol=symbol,
+                            interval=interval,
+                            count=len(data),
+                            limit=limit
+                        )
+                        return data
+                    else:
+                        logger.error(
+                            "klines_fetch_failed",
+                            symbol=symbol,
+                            interval=interval,
+                            status_code=response.status
+                        )
+                        response.raise_for_status()
+                        return []
     
     async def fetch_klines(
         self, 
         symbol: str, 
         interval: str = "1h", 
-        limit: int = 500
+        limit: int = 500,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None
     ) -> List[List]:
-        """Fetch OHLCV klines from Binance with circuit breaker protection"""
+        """Fetch OHLCV klines from Binance with circuit breaker protection
+        
+        Args:
+            symbol: Trading symbol
+            interval: Timeframe interval
+            limit: Maximum number of candles (max 1000)
+            start_time: Optional start time for historical data
+            end_time: Optional end time for historical data
+        """
         try:
             return await self.circuit_breaker.call(
                 self._fetch_klines_impl,
                 symbol,
                 interval,
-                limit
+                limit,
+                start_time,
+                end_time
             )
         except Exception as e:
             logger.error(
@@ -106,15 +139,17 @@ class BinanceIngestionService:
             return []
     
     async def _fetch_ticker_24h_impl(self, symbol: str) -> Optional[Dict]:
-        """Internal implementation of fetch_ticker_24h"""
+        """Internal implementation of fetch_ticker_24h with rate limiting"""
         url = f"{self.base_url}/fapi/v1/ticker/24hr"
         params = {"symbol": symbol}
         
-        async with self.session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=30)) as response:
-            if response.status == 200:
-                return await response.json()
-            response.raise_for_status()
-            return None
+        async with BINANCE_RATE_LIMIT:
+            async with BINANCE_BURST_LIMIT:
+                async with self.session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                    if response.status == 200:
+                        return await response.json()
+                    response.raise_for_status()
+                    return None
     
     async def fetch_ticker_24h(self, symbol: str) -> Optional[Dict]:
         """Fetch 24h ticker data for a single symbol with circuit breaker protection"""
@@ -130,27 +165,29 @@ class BinanceIngestionService:
             return None
     
     async def _fetch_all_tickers_24h_impl(self) -> Dict[str, Dict]:
-        """Internal implementation of fetch_all_tickers_24h"""
+        """Internal implementation of fetch_all_tickers_24h with rate limiting"""
         url = f"{self.base_url}/fapi/v1/ticker/24hr"
         # No symbol parameter = get all tickers
         
-        async with self.session.get(url, timeout=aiohttp.ClientTimeout(total=60)) as response:
-            if response.status == 200:
-                tickers = await response.json()
-                # Convert list to dictionary keyed by symbol for fast lookup
-                ticker_dict = {ticker.get("symbol"): ticker for ticker in tickers if ticker.get("symbol")}
-                logger.info(
-                    "all_tickers_fetched",
-                    count=len(ticker_dict)
-                )
-                return ticker_dict
-            else:
-                logger.error(
-                    "all_tickers_fetch_failed",
-                    status_code=response.status
-                )
-                response.raise_for_status()
-                return {}
+        async with BINANCE_RATE_LIMIT:
+            async with BINANCE_BURST_LIMIT:
+                async with self.session.get(url, timeout=aiohttp.ClientTimeout(total=60)) as response:
+                    if response.status == 200:
+                        tickers = await response.json()
+                        # Convert list to dictionary keyed by symbol for fast lookup
+                        ticker_dict = {ticker.get("symbol"): ticker for ticker in tickers if ticker.get("symbol")}
+                        logger.info(
+                            "all_tickers_fetched",
+                            count=len(ticker_dict)
+                        )
+                        return ticker_dict
+                    else:
+                        logger.error(
+                            "all_tickers_fetch_failed",
+                            status_code=response.status
+                        )
+                        response.raise_for_status()
+                        return {}
     
     async def fetch_all_tickers_24h(self) -> Dict[str, Dict]:
         """Fetch 24h ticker data for all symbols with circuit breaker protection"""
@@ -165,13 +202,15 @@ class BinanceIngestionService:
             return {}
     
     async def _fetch_exchange_info_impl(self) -> Optional[Dict]:
-        """Internal implementation of fetch_exchange_info"""
+        """Internal implementation of fetch_exchange_info with rate limiting"""
         url = f"{self.base_url}/fapi/v1/exchangeInfo"
-        async with self.session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as response:
-            if response.status == 200:
-                return await response.json()
-            response.raise_for_status()
-            return None
+        async with BINANCE_RATE_LIMIT:
+            async with BINANCE_BURST_LIMIT:
+                async with self.session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                    if response.status == 200:
+                        return await response.json()
+                    response.raise_for_status()
+                    return None
     
     async def fetch_exchange_info(self) -> Optional[Dict]:
         """Fetch exchange information with circuit breaker protection"""
@@ -220,7 +259,7 @@ class BinanceIngestionService:
                 candle = OHLCVCandle(
                     symbol=symbol,
                     timeframe=timeframe,
-                    timestamp=datetime.fromtimestamp(kline[0] / 1000),
+                    timestamp=datetime.fromtimestamp(kline[0] / 1000, tz=timezone.utc),
                     open=float(kline[1]),
                     high=float(kline[2]),
                     low=float(kline[3]),

@@ -20,6 +20,7 @@ from shared.redis_client import publish_event
 # Import from local modules (relative to ingestion-service root)
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from utils.circuit_breaker import AsyncCircuitBreaker
+from utils.rate_limiter import COINGECKO_RATE_LIMIT, COINGECKO_MINUTE_LIMIT
 from config.settings import COINGECKO_API_URL
 from database.repository import get_or_create_symbol_record
 from services.binance_service import BinanceIngestionService
@@ -63,19 +64,21 @@ class CoinGeckoIngestionService:
                 "sparkline": "false"
             }
             
-            async with self.session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=60)) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    all_coins.extend(data)
-                    logger.info(f"Fetched page {page}: {len(data)} coins")
-                else:
-                    logger.error(f"Failed to fetch CoinGecko data: {response.status}")
-                    if response.status == 429:
-                        logger.warning("Rate limited by CoinGecko, waiting 60 seconds...")
-                        await asyncio.sleep(60)
-                        continue
-                    response.raise_for_status()
-                    break
+            async with COINGECKO_RATE_LIMIT:
+                async with COINGECKO_MINUTE_LIMIT:
+                    async with self.session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=60)) as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            all_coins.extend(data)
+                            logger.info(f"Fetched page {page}: {len(data)} coins")
+                        else:
+                            logger.error(f"Failed to fetch CoinGecko data: {response.status}")
+                            if response.status == 429:
+                                logger.warning("Rate limited by CoinGecko, waiting 60 seconds...")
+                                await asyncio.sleep(60)
+                                continue
+                            response.raise_for_status()
+                            break
         
         # Limit to requested number
         return all_coins[:limit]

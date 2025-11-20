@@ -426,7 +426,7 @@ class BinanceWebSocketService:
             self.is_connected = False
             return False
     
-    async def listen_and_process(self, symbols: List[str], timeframes: List[str]):
+    async def listen_and_process(self, symbols: List[str], timeframes: List[str], shutdown_event=None):
         """Listen to WebSocket messages and process kline data with improved error handling"""
         db = None
         candles_saved = 0
@@ -441,7 +441,7 @@ class BinanceWebSocketService:
             logger.error(f"Database connection test failed: {e}", exc_info=True)
         
         try:
-            while True:
+            while shutdown_event is None or not shutdown_event.is_set():
                 try:
                     if not self.is_connected or not self.websocket:
                         # Reconnect with exponential backoff
@@ -479,8 +479,21 @@ class BinanceWebSocketService:
                             await asyncio.sleep(1)
                             continue
                     
-                    # Receive message
-                    message_str = await asyncio.wait_for(self.websocket.recv(), timeout=30.0)
+                    # Receive message (with shutdown check)
+                    try:
+                        message_str = await asyncio.wait_for(
+                            self.websocket.recv(), 
+                            timeout=30.0
+                        )
+                    except asyncio.TimeoutError:
+                        # Check shutdown on timeout
+                        if shutdown_event and shutdown_event.is_set():
+                            break
+                        continue
+                    
+                    if shutdown_event and shutdown_event.is_set():
+                        break
+                    
                     self.messages_received += 1
                     self.last_message_time = time.time()
                     
@@ -610,21 +623,99 @@ class BinanceWebSocketService:
                     pass
             logger.info(f"WebSocket listener stopped. Total: {candles_saved} saved, {candles_failed} failed")
     
-    async def start(self, symbols: List[str], timeframes: List[str]):
-        """Start WebSocket service with reconnection logic"""
+    async def start(self, symbols: List[str], timeframes: List[str], shutdown_event=None):
+        """Start WebSocket service with reconnection logic and fallback to REST API
+        
+        Args:
+            symbols: List of symbols to subscribe to
+            timeframes: List of timeframes to subscribe to
+            shutdown_event: Optional asyncio.Event to signal shutdown
+        """
         logger.info(f"Starting WebSocket service for {len(symbols)} symbols, {len(timeframes)} timeframes")
         
-        while True:
+        consecutive_failures = 0
+        max_consecutive_failures = 5  # After 5 failures, fallback to REST
+        
+        while shutdown_event is None or not shutdown_event.is_set():
             try:
                 if await self.connect_and_subscribe(symbols, timeframes):
-                    await self.listen_and_process(symbols, timeframes)
+                    consecutive_failures = 0  # Reset on successful connection
+                    await self.listen_and_process(symbols, timeframes, shutdown_event)
+                else:
+                    consecutive_failures += 1
             except KeyboardInterrupt:
                 logger.info("WebSocket service stopped by user")
                 break
             except Exception as e:
+                consecutive_failures += 1
                 logger.error(f"WebSocket service error: {e}", exc_info=True)
+                
+                # If too many consecutive failures, fallback to REST API
+                if consecutive_failures >= max_consecutive_failures:
+                    logger.warning(
+                        "websocket_fallback_to_rest",
+                        consecutive_failures=consecutive_failures,
+                        max_failures=max_consecutive_failures
+                    )
+                    await self._fallback_to_rest_api(symbols, timeframes, shutdown_event)
+                    consecutive_failures = 0  # Reset after fallback attempt
+                
+                if shutdown_event and shutdown_event.is_set():
+                    break
+                
                 await asyncio.sleep(self.reconnect_delay)
                 self.reconnect_delay = min(self.reconnect_delay * 2, self.max_reconnect_delay)
+    
+    async def _fallback_to_rest_api(self, symbols: List[str], timeframes: List[str], shutdown_event=None):
+        """Fallback to REST API polling when WebSocket fails"""
+        logger.info("fallback_rest_api_starting", symbol_count=len(symbols), timeframe_count=len(timeframes))
+        
+        from services.binance_service import BinanceIngestionService
+        
+        async with BinanceIngestionService() as binance_service:
+            poll_interval = 60  # Poll every 60 seconds
+            
+            while shutdown_event is None or not shutdown_event.is_set():
+                try:
+                    for symbol in symbols:
+                        if shutdown_event and shutdown_event.is_set():
+                            break
+                        
+                        for timeframe in timeframes:
+                            if shutdown_event and shutdown_event.is_set():
+                                break
+                            
+                            try:
+                                # Fetch latest candles
+                                klines = await binance_service.fetch_klines(symbol, timeframe, limit=1)
+                                if klines:
+                                    candles = binance_service.parse_klines(klines, symbol, timeframe)
+                                    if candles:
+                                        with DatabaseManager() as db:
+                                            binance_service.save_candles(db, candles)
+                                        
+                                        logger.debug(
+                                            "rest_api_poll_success",
+                                            symbol=symbol,
+                                            timeframe=timeframe
+                                        )
+                            except Exception as e:
+                                logger.error(
+                                    "rest_api_poll_error",
+                                    symbol=symbol,
+                                    timeframe=timeframe,
+                                    error=str(e)
+                                )
+                    
+                    # Wait before next poll
+                    await asyncio.sleep(poll_interval)
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    logger.error(f"Fallback REST API error: {e}", exc_info=True)
+                    await asyncio.sleep(poll_interval)
+        
+        logger.info("fallback_rest_api_stopped")
     
     def get_metrics(self) -> Dict:
         """Get WebSocket connection metrics"""
