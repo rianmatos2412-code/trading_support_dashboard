@@ -361,11 +361,18 @@ class BinanceIngestionService:
             if candles:
                 with DatabaseManager() as db:
                     self.save_candles(db, candles)
-                    # Publish event
+                    # Publish event with full OHLCV data
+                    latest_candle = candles[-1]
                     publish_event("candle_update", {
                         "symbol": symbol,
                         "timeframe": timeframe,
-                        "timestamp": candles[-1].timestamp.isoformat()
+                        "timestamp": latest_candle.timestamp.isoformat(),
+                        "open": float(latest_candle.open),
+                        "high": float(latest_candle.high),
+                        "low": float(latest_candle.low),
+                        "close": float(latest_candle.close),
+                        "volume": float(latest_candle.volume),
+                        "closed": True
                     })
             
             # Note: market_data (price, market_cap, volume_24h) is updated hourly 

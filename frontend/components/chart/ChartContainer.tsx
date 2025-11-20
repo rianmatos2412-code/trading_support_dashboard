@@ -33,6 +33,7 @@ export function ChartContainer({
   const [oldestLoadedTime, setOldestLoadedTime] = useState<number | null>(null);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const loadMoreTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const prevCandlesRef = useRef<Candle[]>([]);
 
   const {
     candles,
@@ -238,7 +239,7 @@ export function ChartContainer({
     };
   }, [oldestLoadedTime, isLoadingMore, loadMoreHistoricalData]);
 
-  // Update candles data
+  // Update candles data with optimized incremental updates
   useEffect(() => {
     if (!seriesRef.current || !candles.length) return;
 
@@ -246,41 +247,94 @@ export function ChartContainer({
       (c) => c.symbol === selectedSymbol && c.timeframe === selectedTimeframe
     );
 
-    const chartData: CandlestickData[] = filteredCandles
-      .map((candle) => ({
-        time: (new Date(candle.timestamp).getTime() / 1000) as Time,
-        open: candle.open,
-        high: candle.high,
-        low: candle.low,
-        close: candle.close,
-      }))
-      .sort((a, b) => (a.time as number) - (b.time as number)); // Sort ascending by time
+    const prevFiltered = prevCandlesRef.current.filter(
+      (c) => c.symbol === selectedSymbol && c.timeframe === selectedTimeframe
+    );
 
-    // Update the series data
-    // Note: setData replaces all data, so we need to pass the complete sorted array
-    seriesRef.current.setData(chartData);
+    // Check if this is initial load or symbol/timeframe changed
+    const isInitialLoad = prevFiltered.length === 0;
+    const symbolChanged = prevFiltered.length > 0 && 
+      (prevFiltered[0]?.symbol !== filteredCandles[0]?.symbol || 
+       prevFiltered[0]?.timeframe !== filteredCandles[0]?.timeframe);
 
-    // Update oldest loaded time if we have new data
-    if (chartData.length > 0) {
-      const oldest = Math.min(...chartData.map((d) => d.time as number));
-      if (!oldestLoadedTime || oldest < oldestLoadedTime) {
-        setOldestLoadedTime(oldest);
+    if (isInitialLoad || symbolChanged) {
+      // Full data replacement for initial load or symbol/timeframe change
+      const chartData: CandlestickData[] = filteredCandles
+        .map((candle) => ({
+          time: (new Date(candle.timestamp).getTime() / 1000) as Time,
+          open: candle.open,
+          high: candle.high,
+          low: candle.low,
+          close: candle.close,
+        }))
+        .sort((a, b) => (a.time as number) - (b.time as number)); // Sort ascending by time
+
+      seriesRef.current.setData(chartData);
+
+      // Update oldest loaded time if we have new data
+      if (chartData.length > 0) {
+        const oldest = Math.min(...chartData.map((d) => d.time as number));
+        if (!oldestLoadedTime || oldest < oldestLoadedTime) {
+          setOldestLoadedTime(oldest);
+        }
+      }
+      
+      // Fit content only on initial load or symbol/timeframe change
+      if (chartRef.current && chartData.length > 0) {
+        const visibleRange = chartRef.current.timeScale().getVisibleRange();
+        if (!visibleRange) {
+          chartRef.current.timeScale().fitContent();
+        }
+      }
+    } else {
+      // Incremental updates - only update new/changed candles
+      const prevMap = new Map(
+        prevFiltered.map(c => [c.timestamp, c])
+      );
+      
+      // Find new or updated candles
+      const newOrUpdatedCandles = filteredCandles.filter(c => {
+        const prev = prevMap.get(c.timestamp);
+        // New candle or price changed (for real-time updates)
+        return !prev || 
+               prev.open !== c.open || 
+               prev.high !== c.high || 
+               prev.low !== c.low || 
+               prev.close !== c.close;
+      });
+
+      // Update chart with new/changed candles using update() for efficiency
+      newOrUpdatedCandles.forEach(candle => {
+        if (seriesRef.current) {
+          seriesRef.current.update({
+            time: (new Date(candle.timestamp).getTime() / 1000) as Time,
+            open: candle.open,
+            high: candle.high,
+            low: candle.low,
+            close: candle.close,
+          });
+        }
+      });
+
+      // Update oldest loaded time if we have new older data
+      if (filteredCandles.length > 0) {
+        const oldest = Math.min(
+          ...filteredCandles.map((c) => new Date(c.timestamp).getTime() / 1000)
+        );
+        if (!oldestLoadedTime || oldest < oldestLoadedTime) {
+          setOldestLoadedTime(oldest);
+        }
       }
     }
-    
-    // Fit content only on initial load or symbol/timeframe change
-    if (chartRef.current && chartData.length > 0) {
-      // Only fit content if we don't have a visible range set (initial load)
-      const visibleRange = chartRef.current.timeScale().getVisibleRange();
-      if (!visibleRange) {
-        chartRef.current.timeScale().fitContent();
-      }
-    }
+
+    // Update previous candles reference
+    prevCandlesRef.current = candles;
   }, [candles, selectedSymbol, selectedTimeframe, oldestLoadedTime]);
 
-  // Reset oldest loaded time when symbol or timeframe changes
+  // Reset oldest loaded time and previous candles when symbol or timeframe changes
   useEffect(() => {
     setOldestLoadedTime(null);
+    prevCandlesRef.current = [];
   }, [selectedSymbol, selectedTimeframe]);
 
   // Render overlays - ensure arrays are always arrays

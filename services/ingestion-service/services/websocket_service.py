@@ -332,14 +332,20 @@ class BinanceWebSocketService:
             db.flush()
             saved_count = len(params_list)
             
-            # Publish events for closed candles
+            # Publish events for closed candles with full OHLCV data
             for kline_data in candles:
                 if kline_data.get("is_closed", False):
                     try:
+                        timestamp = kline_data.get("timestamp")
                         publish_event("candle_update", {
                             "symbol": kline_data.get("symbol"),
                             "timeframe": kline_data.get("timeframe"),
-                            "timestamp": kline_data.get("timestamp").isoformat(),
+                            "timestamp": timestamp.isoformat() if hasattr(timestamp, 'isoformat') else str(timestamp),
+                            "open": float(kline_data.get("open", 0)),
+                            "high": float(kline_data.get("high", 0)),
+                            "low": float(kline_data.get("low", 0)),
+                            "close": float(kline_data.get("close", 0)),
+                            "volume": float(kline_data.get("volume", 0)),
                             "closed": True
                         })
                     except Exception as e:

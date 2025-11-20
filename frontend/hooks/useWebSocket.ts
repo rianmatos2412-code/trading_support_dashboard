@@ -32,7 +32,7 @@ export function useWebSocket(symbol?: string, timeframe?: string) {
       wsRef.current = ws;
 
       ws.onopen = () => {
-        console.log("WebSocket connected");
+        console.log("WebSocket connected to:", WS_URL);
         reconnectAttempts.current = 0;
         reconnectDelay.current = 1000;
         setError(null);
@@ -45,12 +45,14 @@ export function useWebSocket(symbol?: string, timeframe?: string) {
           symbol: currentSymbol,
           timeframe: currentTimeframe,
         };
+        console.log("Subscribing to:", subscribeMessage);
         ws.send(JSON.stringify(subscribeMessage));
       };
 
       ws.onmessage = (event) => {
         try {
           const message = JSON.parse(event.data);
+          console.log("WebSocket message received:", message);
           handleMessage(message);
         } catch (error) {
           console.error("Error parsing WebSocket message:", error);
@@ -121,8 +123,8 @@ export function useWebSocket(symbol?: string, timeframe?: string) {
     // Disconnect previous connection
     disconnect();
 
-    // Only connect if WebSocket URL is available
-    if (WS_URL && WS_URL !== "ws://localhost:8000/ws") {
+    // Always try to connect if we have a WebSocket URL
+    if (WS_URL) {
       connect();
     } else {
       // Fallback to polling if WebSocket is not available
