@@ -303,26 +303,88 @@ export function ChartContainer({
                prev.close !== c.close;
       });
 
-      // Update chart with new/changed candles using update() for efficiency
-      newOrUpdatedCandles.forEach(candle => {
-        if (seriesRef.current) {
-          seriesRef.current.update({
+      // Check if we have any candles older than the oldest loaded time
+      // If so, we need to rebuild the entire dataset because update() can't update older data
+      const hasOlderData = oldestLoadedTime !== null && newOrUpdatedCandles.some(candle => {
+        const candleTime = new Date(candle.timestamp).getTime() / 1000;
+        return candleTime < oldestLoadedTime!;
+      });
+
+      if (hasOlderData) {
+        // Rebuild entire dataset with all candles sorted by time
+        const chartData: CandlestickData[] = filteredCandles
+          .map((candle) => ({
             time: (new Date(candle.timestamp).getTime() / 1000) as Time,
             open: candle.open,
             high: candle.high,
             low: candle.low,
             close: candle.close,
-          });
-        }
-      });
+          }))
+          .sort((a, b) => (a.time as number) - (b.time as number));
 
-      // Update oldest loaded time if we have new older data
-      if (filteredCandles.length > 0) {
-        const oldest = Math.min(
-          ...filteredCandles.map((c) => new Date(c.timestamp).getTime() / 1000)
-        );
-        if (!oldestLoadedTime || oldest < oldestLoadedTime) {
+        if (seriesRef.current) {
+          seriesRef.current.setData(chartData);
+        }
+
+        // Update oldest loaded time
+        if (chartData.length > 0) {
+          const oldest = Math.min(...chartData.map((d) => d.time as number));
           setOldestLoadedTime(oldest);
+        }
+      } else {
+        // Update chart with new/changed candles using update() for efficiency
+        // This only works if all candles are newer than or equal to the oldest loaded time
+        let rebuildNeeded = false;
+        
+        for (const candle of newOrUpdatedCandles) {
+          if (seriesRef.current) {
+            try {
+              seriesRef.current.update({
+                time: (new Date(candle.timestamp).getTime() / 1000) as Time,
+                open: candle.open,
+                high: candle.high,
+                low: candle.low,
+                close: candle.close,
+              });
+            } catch (error) {
+              // If update fails (e.g., trying to update older data), mark for rebuild
+              console.warn("Update failed, will rebuild chart data:", error);
+              rebuildNeeded = true;
+              break; // Exit loop - we'll rebuild everything
+            }
+          }
+        }
+
+        // If update failed, rebuild entire dataset
+        if (rebuildNeeded) {
+          const chartData: CandlestickData[] = filteredCandles
+            .map((c) => ({
+              time: (new Date(c.timestamp).getTime() / 1000) as Time,
+              open: c.open,
+              high: c.high,
+              low: c.low,
+              close: c.close,
+            }))
+            .sort((a, b) => (a.time as number) - (b.time as number));
+          
+          if (seriesRef.current) {
+            seriesRef.current.setData(chartData);
+          }
+          
+          if (chartData.length > 0) {
+            const oldest = Math.min(...chartData.map((d) => d.time as number));
+            setOldestLoadedTime(oldest);
+          }
+        }
+
+        // Update oldest loaded time if we have new older data
+        if (filteredCandles.length > 0) {
+          const oldest = Math.min(
+            ...filteredCandles.map((c) => new Date(c.timestamp).getTime() / 1000)
+          );
+          if (!oldestLoadedTime || oldest < oldestLoadedTime) {
+            setOldestLoadedTime(oldest);
+          }
         }
       }
     }

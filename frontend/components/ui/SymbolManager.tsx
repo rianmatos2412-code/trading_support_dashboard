@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, useCallback, useEffect } from "react";
-import { Search, X, Filter } from "lucide-react";
+import { Search, X, Filter, ArrowUp, ArrowDown, ChevronUp, ChevronDown } from "lucide-react";
 import { useMarketStore } from "@/stores/useMarketStore";
 import { useDebounce } from "@/hooks/useDebounce";
 import { SymbolRow } from "./SymbolRow";
@@ -28,6 +28,9 @@ interface SymbolManagerProps {
 
 const FAVORITES_STORAGE_KEY = "trading_dashboard_favorites";
 
+type SortField = "marketcap" | "volume_24h" | "price";
+type SortDirection = "asc" | "desc";
+
 export function SymbolManager({
   symbols,
   onSelect,
@@ -42,6 +45,8 @@ export function SymbolManager({
   const [maxMarketCap, setMaxMarketCap] = useState("");
   const [minVolume24h, setMinVolume24h] = useState("");
   const [maxVolume24h, setMaxVolume24h] = useState("");
+  const [sortField, setSortField] = useState<SortField>("marketcap");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [favorites, setFavorites] = useState<string[]>(() => {
     if (typeof window !== "undefined") {
       const stored = localStorage.getItem(FAVORITES_STORAGE_KEY);
@@ -128,12 +133,39 @@ export function SymbolManager({
       }
     });
 
-    // Sort regular items by market cap (descending - highest first)
-    // Symbols without market cap go to the end
+    // Sort regular items by selected field and direction
     regular.sort((a, b) => {
-      const marketCapA = a.marketcap || 0;
-      const marketCapB = b.marketcap || 0;
-      return marketCapB - marketCapA;
+      let valueA: number;
+      let valueB: number;
+
+      switch (sortField) {
+        case "marketcap":
+          valueA = a.marketcap || 0;
+          valueB = b.marketcap || 0;
+          break;
+        case "volume_24h":
+          valueA = a.volume_24h || 0;
+          valueB = b.volume_24h || 0;
+          break;
+        case "price":
+          valueA = a.price || 0;
+          valueB = b.price || 0;
+          break;
+        default:
+          valueA = a.marketcap || 0;
+          valueB = b.marketcap || 0;
+      }
+
+      // Handle missing values - put them at the end
+      if (valueA === 0 && valueB !== 0) return 1;
+      if (valueA !== 0 && valueB === 0) return -1;
+
+      // Sort by direction
+      if (sortDirection === "asc") {
+        return valueA - valueB;
+      } else {
+        return valueB - valueA;
+      }
     });
 
     // Remove undefined entries from favorites array
@@ -141,7 +173,7 @@ export function SymbolManager({
       favoriteItems: favs.filter((item) => item !== undefined),
       regularItems: regular,
     };
-  }, [filteredSymbols, favorites]);
+  }, [filteredSymbols, favorites, sortField, sortDirection]);
 
   const handleSelect = useCallback(
     (symbol: string) => {
@@ -178,6 +210,26 @@ export function SymbolManager({
     setMinVolume24h("");
     setMaxVolume24h("");
   }, []);
+
+  const handleSort = useCallback((field: SortField) => {
+    if (sortField === field) {
+      // Toggle direction if same field
+      setSortDirection((prev) => (prev === "asc" ? "desc" : "asc"));
+    } else {
+      // Set new field with descending as default
+      setSortField(field);
+      setSortDirection("desc");
+    }
+  }, [sortField]);
+
+  const getSortIcon = useCallback((field: SortField) => {
+    if (sortField !== field) return null;
+    return sortDirection === "asc" ? (
+      <ArrowUp className="h-3 w-3" />
+    ) : (
+      <ArrowDown className="h-3 w-3" />
+    );
+  }, [sortField, sortDirection]);
 
   // Calculate max values for filters
   const maxValues = useMemo(() => {
@@ -222,9 +274,10 @@ export function SymbolManager({
               </button>
             )}
           </div>
+          
           <button
             onClick={() => setShowFilters(!showFilters)}
-            className="w-full flex items-center justify-center gap-2 py-1.5 px-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
+            className="w-full flex items-center justify-center gap-2 py-1.5 px-2 text-xs text-muted-foreground hover:text-foreground transition-colors mb-2"
           >
             <Filter className="h-3.5 w-3.5" />
             Filters
@@ -234,6 +287,52 @@ export function SymbolManager({
               </span>
             )}
           </button>
+
+          {/* Sort Controls */}
+          <div className="flex gap-1">
+            <button
+              onClick={() => handleSort("marketcap")}
+              className={`
+                flex-1 flex items-center justify-center gap-1 py-1.5 px-2 text-xs rounded transition-colors
+                ${sortField === "marketcap" 
+                  ? "bg-primary/20 text-primary" 
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                }
+              `}
+              title="Sort by Market Cap"
+            >
+              MCap
+              {getSortIcon("marketcap")}
+            </button>
+            <button
+              onClick={() => handleSort("volume_24h")}
+              className={`
+                flex-1 flex items-center justify-center gap-1 py-1.5 px-2 text-xs rounded transition-colors
+                ${sortField === "volume_24h" 
+                  ? "bg-primary/20 text-primary" 
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                }
+              `}
+              title="Sort by 24h Volume"
+            >
+              Vol
+              {getSortIcon("volume_24h")}
+            </button>
+            <button
+              onClick={() => handleSort("price")}
+              className={`
+                flex-1 flex items-center justify-center gap-1 py-1.5 px-2 text-xs rounded transition-colors
+                ${sortField === "price" 
+                  ? "bg-primary/20 text-primary" 
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                }
+              `}
+              title="Sort by Price"
+            >
+              Price
+              {getSortIcon("price")}
+            </button>
+          </div>
         </div>
 
         {/* Filter Panel */}
