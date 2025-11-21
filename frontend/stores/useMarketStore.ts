@@ -99,11 +99,27 @@ export const useMarketStore = create<MarketState>((set) => ({
     }),
   setSwingPoints: (swings) => set({ swingPoints: Array.isArray(swings) ? swings : [] }),
   addSwingPoint: (swing) =>
-    set((state) => ({
-      swingPoints: [...state.swingPoints, swing].filter(
+    set((state) => {
+      // Filter to only keep swing points for the same symbol/timeframe
+      const filtered = state.swingPoints.filter(
         (s) => s.symbol === swing.symbol && s.timeframe === swing.timeframe
-      ),
-    })),
+      );
+      
+      // Check if this swing point already exists (deduplicate by ID or timestamp+type)
+      const exists = filtered.some(
+        (s) => 
+          (s.id && swing.id && s.id === swing.id) || 
+          (s.timestamp === swing.timestamp && s.type === swing.type)
+      );
+      
+      // Only add if it doesn't already exist
+      if (exists) {
+        return { swingPoints: filtered };
+      }
+      
+      // Add the new swing point
+      return { swingPoints: [...filtered, swing] };
+    }),
   setSRLevels: (levels) => set({ srLevels: Array.isArray(levels) ? levels : [] }),
   setSignals: (signals) => set({ signals }),
   addSignal: (signal) =>

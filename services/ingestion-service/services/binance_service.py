@@ -333,6 +333,15 @@ class BinanceIngestionService:
                 timeframe=first_candle.timeframe,
                 count=len(candles)
             )
+            
+            # Publish event for swing detection
+            publish_event("candle_inserted", {
+                "symbol": first_candle.symbol,
+                "timeframe": first_candle.timeframe,
+                "symbol_id": symbol_id,
+                "timeframe_id": timeframe_id,
+                "candle_count": len(candles)
+            })
         except Exception as e:
             logger.error(
                 "candles_save_error",

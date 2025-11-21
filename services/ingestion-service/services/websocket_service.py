@@ -413,6 +413,27 @@ class BinanceWebSocketService:
             db.flush()
             saved_count = len(params_list)
             
+            # Publish events for swing detection (once per symbol/timeframe combination)
+            processed_combinations = set()
+            for kline_data in candles:
+                symbol = kline_data.get("symbol")
+                timeframe = kline_data.get("timeframe")
+                cache_key = (symbol, timeframe)
+                
+                if cache_key not in processed_combinations:
+                    processed_combinations.add(cache_key)
+                    if cache_key in symbol_timeframe_map:
+                        symbol_id, timeframe_id = symbol_timeframe_map[cache_key]
+                        # Count candles for this symbol/timeframe
+                        candle_count = len([c for c in candles if c.get("symbol") == symbol and c.get("timeframe") == timeframe])
+                        publish_event("candle_inserted", {
+                            "symbol": symbol,
+                            "timeframe": timeframe,
+                            "symbol_id": symbol_id,
+                            "timeframe_id": timeframe_id,
+                            "candle_count": candle_count
+                        })
+            
             # Publish events for closed candles with full OHLCV data
             # All candles in this method are closed (in-progress are filtered out earlier)
             for kline_data in candles:

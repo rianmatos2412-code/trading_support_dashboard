@@ -192,14 +192,26 @@ export default function DashboardPage() {
       setLoading(true);
       setError(null);
       try {
-        const [candles] = await Promise.all([
+        const [candles, swings, srLevels, signal] = await Promise.all([
           fetchCandles(selectedSymbol, selectedTimeframe, 1000),
-          // fetchSwingPoints(selectedSymbol, selectedTimeframe),
-          // fetchSRLevels(selectedSymbol, selectedTimeframe),
-          // fetchLatestSignal(selectedSymbol),
+          fetchSwingPoints(selectedSymbol, selectedTimeframe).catch(err => {
+            console.warn("Error fetching swing points:", err);
+            return [];
+          }),
+          fetchSRLevels(selectedSymbol, selectedTimeframe).catch(err => {
+            console.warn("Error fetching SR levels:", err);
+            return [];
+          }),
+          fetchLatestSignal(selectedSymbol).catch(err => {
+            console.warn("Error fetching latest signal:", err);
+            return null;
+          }),
         ]);
 
         setCandles(candles);
+        setSwingPoints(swings);
+        setSRLevels(srLevels);
+        setLatestSignal(signal);
       } catch (error) {
         console.error("Error loading data:", error);
         setError("Failed to load market data");
@@ -209,7 +221,7 @@ export default function DashboardPage() {
     };
 
     loadData();
-  }, [selectedSymbol, selectedTimeframe, setCandles, setLoading, setError]);
+  }, [selectedSymbol, selectedTimeframe, setCandles, setSwingPoints, setSRLevels, setLatestSignal, setLoading, setError]);
 
   const marketScore = latestSignal?.market_score || 0;
 

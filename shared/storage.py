@@ -362,7 +362,7 @@ class StorageService:
                 INNER JOIN timeframe t ON sp.timeframe_id = t.timeframe_id
                 WHERE s.symbol_name = :symbol
                 AND t.tf_name = :timeframe
-                ORDER BY sp.timestamp DESC
+                ORDER BY sp.timestamp ASC
                 LIMIT :limit
             """)
             

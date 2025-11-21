@@ -163,7 +163,9 @@ class ConnectionManager:
             return
         
         clients_notified = 0
-        for ws_id, subscriptions in self.subscriptions.items():
+        # Create a snapshot of subscriptions to avoid dictionary changed size during iteration
+        subscriptions_snapshot = list(self.subscriptions.items())
+        for ws_id, subscriptions in subscriptions_snapshot:
             if symbol in subscriptions and timeframe in subscriptions[symbol]:
                 await self.send_personal_message(ws_id, {
                     "type": "candle",
@@ -199,7 +201,9 @@ class ConnectionManager:
         # Broadcast directly - ticker event already contains: symbol, price, volume_24h, change24h
         # No need to query database which would be slow and potentially return stale data
         clients_notified = 0
-        for ws_id in self.active_connections.keys():
+        # Create a snapshot of connection IDs to avoid dictionary changed size during iteration
+        connection_ids = list(self.active_connections.keys())
+        for ws_id in connection_ids:
             await self.send_personal_message(ws_id, {
                 "type": "symbol_update",
                 "data": symbol_data
@@ -218,7 +222,9 @@ class ConnectionManager:
         
         clients_notified = 0
         # Broadcast to all connected clients
-        for ws_id in self.active_connections.keys():
+        # Create a snapshot of connection IDs to avoid dictionary changed size during iteration
+        connection_ids = list(self.active_connections.keys())
+        for ws_id in connection_ids:
             await self.send_personal_message(ws_id, {
                 "type": "marketcap_update",
                 "data": marketcap_data
@@ -226,6 +232,28 @@ class ConnectionManager:
             clients_notified += 1
         
         logger.debug(f"Broadcasted market cap update for {symbol} to {clients_notified} clients")
+    
+    async def broadcast_swing_point(self, swing_data: dict):
+        """Broadcast new swing point to all subscribed clients"""
+        symbol = swing_data.get("symbol")
+        timeframe = swing_data.get("timeframe")
+        
+        if not symbol or not timeframe:
+            logger.warning(f"Swing point update missing symbol or timeframe: {swing_data}")
+            return
+        
+        clients_notified = 0
+        # Create a snapshot of subscriptions to avoid dictionary changed size during iteration
+        subscriptions_snapshot = list(self.subscriptions.items())
+        for ws_id, subscriptions in subscriptions_snapshot:
+            if symbol in subscriptions and timeframe in subscriptions[symbol]:
+                await self.send_personal_message(ws_id, {
+                    "type": "swing",
+                    "data": swing_data
+                })
+                clients_notified += 1
+        
+        logger.debug(f"Broadcasted swing point for {symbol} {timeframe} to {clients_notified} clients")
     
     async def start_redis_listener(self):
         """Start listening to Redis pub/sub for candle updates"""
@@ -237,9 +265,9 @@ class ConnectionManager:
         async def listen():
             """Listen for Redis pub/sub messages"""
             pubsub = redis_client.pubsub()
-            pubsub.subscribe("candle_update", "symbol_update", "marketcap_update")
+            pubsub.subscribe("candle_update", "symbol_update", "marketcap_update", "swing_point_new")
             
-            logger.info("Redis listener started for candle, symbol, and marketcap updates")
+            logger.info("Redis listener started for candle, symbol, marketcap, and swing point updates")
             
             while True:
                 try:
@@ -287,6 +315,8 @@ class ConnectionManager:
                                 await self.broadcast_symbol_update(data)
                             elif channel == "marketcap_update":
                                 await self.broadcast_marketcap_update(data)
+                            elif channel == "swing_point_new":
+                                await self.broadcast_swing_point(data)
                             else:
                                 logger.debug(f"Received message on unknown channel: {channel}")
                                 
