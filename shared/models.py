@@ -1,7 +1,7 @@
 """
 SQLAlchemy models for Trading Support Architecture
 """
-from sqlalchemy import Column, Integer, String, Numeric, Boolean, DateTime, Text, CheckConstraint
+from sqlalchemy import Column, Integer, String, Numeric, Boolean, DateTime, Text, CheckConstraint, Float
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.sql import func
 from datetime import datetime
@@ -197,3 +197,26 @@ class FibConfig(Base):
         CheckConstraint("setup_type IN ('long', 'short')", name="check_setup_type"),
     )
 
+class Alert(Base):
+    __tablename__ = "alerts"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    timeframe = Column(String, default="unknown")
+    trend_type = Column(String)
+    asset = Column(String)
+
+    current_price = Column(Float)
+    approaching = Column(Boolean)
+
+    entry_level = Column(Float)
+    sl = Column(Float)
+
+    tp1 = Column(Float)
+    tp2 = Column(Float)
+    tp3 = Column(Float)
+
+    swing_low = Column(Float)
+    swing_high = Column(Float)
+
+    risk_score = Column(Float)
