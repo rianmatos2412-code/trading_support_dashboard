@@ -558,7 +558,7 @@ class StrategyInterface:
             return self._empty_result()
         
         # Step 3: Get swing highs and lows
-        if ("BTC" in asset_symbol) and  ("ETH" in asset_symbol) and ("SOL" in asset_symbol):
+        if ("BTCUSDT" not in asset_symbol) and  ("ETHUSDT" not in asset_symbol) and ("SOLUSDT" not in asset_symbol):
             asset_symbol = "OTHER"
         swing_pruning_rate = self.swing_high_low_pruning_score.get(
             asset_symbol, 

@@ -116,7 +116,7 @@ CREATE INDEX idx_asset_info_symbol ON asset_info(symbol);
 
 -- Strategy Engine Alerts (main output table for strategy-engine)
 CREATE TABLE strategy_alerts (
-    id BIGSERIAL PRIMARY KEY,
+    id BIGSERIAL,
     symbol_id INTEGER NOT NULL REFERENCES symbols(symbol_id),
     timeframe_id INTEGER NOT NULL REFERENCES timeframe(timeframe_id),
     timestamp TIMESTAMPTZ NOT NULL,
@@ -127,7 +127,7 @@ CREATE TABLE strategy_alerts (
     take_profit_1 DECIMAL(20, 8) NOT NULL,
     take_profit_2 DECIMAL(20, 8),
     take_profit_3 DECIMAL(20, 8),
-    risk_score VARCHAR(20),  -- e.g., 'none', 'good', 'high', 'higher', 'very_high'
+    risk_score TEXT,  -- e.g., 'none', 'good', 'high', 'higher', 'very_high'
     
     -- Swing Pair Context (snapshot of the specific pair used for this alert)
     swing_low_price DECIMAL(20, 8) NOT NULL,
@@ -136,9 +136,12 @@ CREATE TABLE strategy_alerts (
     swing_high_timestamp TIMESTAMPTZ NOT NULL,
     
     -- Additional context
-    direction VARCHAR(10) CHECK (direction IN ('long', 'short')),
+    direction TEXT CHECK (direction IN ('long', 'short')),
     
     created_at TIMESTAMPTZ DEFAULT NOW(),
+    
+    -- Primary key includes timestamp for TimescaleDB partitioning
+    PRIMARY KEY (id, timestamp),
     
     -- Prevent duplicate alerts for same swing pair at same timestamp
     UNIQUE(symbol_id, timeframe_id, swing_low_price, swing_high_price, timestamp)

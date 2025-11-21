@@ -6,6 +6,7 @@ It orchestrates the complete workflow from data fetching to alert generation.
 The strategy only executes when new 4H or 30M candles are detected.
 """
 from strategy_interface import StrategyInterface
+from alert_database import AlertDatabase
 
 
 class RunStrategy:
@@ -79,7 +80,7 @@ class RunStrategy:
             result['latest_4h_timestamp'] = latest_4h_timestamp
             
             if latest_4h_timestamp is not None:
-                result['has_new_4h'] = self.strategy.db.is_new_candle(
+                result['has_new_4h'] = self.db.is_new_candle(
                     asset_symbol, '4h', latest_4h_timestamp
                 )
         
@@ -89,7 +90,7 @@ class RunStrategy:
             result['latest_30m_timestamp'] = latest_30m_timestamp
             
             if latest_30m_timestamp is not None:
-                result['has_new_30m'] = self.strategy.db.is_new_candle(
+                result['has_new_30m'] = self.db.is_new_candle(
                     asset_symbol, '30m', latest_30m_timestamp
                 )
         
@@ -119,24 +120,24 @@ class RunStrategy:
             - 'db_summary': dict - Database save summary if executed, None otherwise
         """
         # Check for new candles
-        new_candles_info = self._check_new_candles(df_4h, df_30m, asset_symbol)
+        # new_candles_info = self._check_new_candles(df_4h, df_30m, asset_symbol)
         
-        if not new_candles_info['should_execute']:
-            return {
-                'executed': False,
-                'reason': 'No new candles detected. Strategy skipped.',
-                'new_candles': new_candles_info,
-                'result': None,
-                'db_summary': None
-            }
+        # if not new_candles_info['should_execute']:
+        #     return {
+        #         'executed': False,
+        #         'reason': 'No new candles detected. Strategy skipped.',
+        #         'new_candles': new_candles_info,
+        #         'result': None,
+        #         'db_summary': None
+        #     }
         
-        # Determine which timeframes have new candles
-        reasons = []
-        if new_candles_info['has_new_4h']:
-            reasons.append('new 4H candle')
-        if new_candles_info['has_new_30m']:
-            reasons.append('new 30M candle')
-        reason = f"Strategy executed due to: {', '.join(reasons)}"
+        # # Determine which timeframes have new candles
+        # reasons = []
+        # if new_candles_info['has_new_4h']:
+        #     reasons.append('new 4H candle')
+        # if new_candles_info['has_new_30m']:
+        #     reasons.append('new 30M candle')
+        # reason = f"Strategy executed due to: {', '.join(reasons)}"
         
         # Execute the strategy
         strategy_result = self.strategy.execute_strategy(

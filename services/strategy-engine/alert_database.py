@@ -16,6 +16,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '../../'))
 
 from shared.database import SessionLocal
 from shared.logger import setup_logger
+from shared.redis_client import publish_event
 
 logger = setup_logger(__name__)
 
@@ -214,8 +215,8 @@ class AlertDatabase:
                     elif alert_timestamp is None:
                         alert_timestamp = datetime.now()
                     
-                    # Insert alert
-                    db.execute(
+                    # Insert alert and get the inserted ID
+                    result = db.execute(
                         text("""
                             INSERT INTO strategy_alerts (
                                 symbol_id, timeframe_id, timestamp,
@@ -230,6 +231,7 @@ class AlertDatabase:
                             )
                             ON CONFLICT (symbol_id, timeframe_id, swing_low_price, swing_high_price, timestamp)
                             DO NOTHING
+                            RETURNING id
                         """),
                         {
                             "symbol_id": symbol_id,
@@ -248,6 +250,29 @@ class AlertDatabase:
                             "direction": alert.get('trend_type')  # 'long' or 'short'
                         }
                     )
+                    
+                    inserted_row = result.fetchone()
+                    if inserted_row:  # Alert was actually inserted (not skipped due to conflict)
+                        alert_id = inserted_row[0]
+                        # Publish event to Redis for API service to broadcast
+                        try:
+                            publish_event("strategy_alert", {
+                                "id": alert_id,
+                                "symbol": asset_symbol,
+                                "timeframe": timeframe,
+                                "timestamp": alert_timestamp.isoformat() if hasattr(alert_timestamp, 'isoformat') else str(alert_timestamp),
+                                "entry_price": float(alert.get('entry_level', 0)),
+                                "stop_loss": float(alert.get('sl', 0)),
+                                "take_profit_1": float(alert.get('tp1', 0)),
+                                "take_profit_2": float(alert.get('tp2')) if alert.get('tp2') is not None else None,
+                                "take_profit_3": float(alert.get('tp3')) if alert.get('tp3') is not None else None,
+                                "risk_score": str(alert.get('risk_score', 'none')),
+                                "swing_low_price": float(low_price),
+                                "swing_high_price": float(high_price),
+                                "direction": alert.get('trend_type')
+                            })
+                        except Exception as e:
+                            logger.warning(f"Failed to publish strategy_alert event: {e}")
                     
                     saved_count += 1
                     

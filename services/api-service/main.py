@@ -216,6 +216,49 @@ class ConnectionManager:
         
         logger.debug(f"Broadcasted market cap update for {symbol} to {clients_notified} clients")
     
+    async def broadcast_strategy_alert(self, alert_data: dict):
+        """Broadcast strategy alert to all connected clients as TradingSignal"""
+        symbol = alert_data.get("symbol")
+        
+        if not symbol:
+            logger.warning(f"Strategy alert missing symbol: {alert_data}")
+            return
+        
+        # Map strategy_alert to TradingSignal format expected by frontend
+        signal_data = {
+            "id": alert_data.get("id"),
+            "symbol": symbol,
+            "timestamp": alert_data.get("timestamp"),
+            "market_score": 0,  # Not available in strategy_alerts, default to 0
+            "direction": alert_data.get("direction", "long"),
+            "price": alert_data.get("entry_price", 0),
+            "entry1": alert_data.get("entry_price"),
+            "entry2": None,  # Not available in strategy_alerts
+            "sl": alert_data.get("stop_loss"),
+            "tp1": alert_data.get("take_profit_1"),
+            "tp2": alert_data.get("take_profit_2"),
+            "tp3": alert_data.get("take_profit_3"),
+            "swing_high": alert_data.get("swing_high_price"),
+            "swing_low": alert_data.get("swing_low_price"),
+            "support_level": None,  # Not available in strategy_alerts
+            "resistance_level": None,  # Not available in strategy_alerts
+            "confluence": alert_data.get("risk_score"),  # Use risk_score as confluence
+            "risk_reward_ratio": None,  # Can be calculated if needed
+            "pullback_detected": False,  # Not available in strategy_alerts
+            "confidence_score": None  # Not available in strategy_alerts
+        }
+        
+        clients_notified = 0
+        # Broadcast to all connected clients (signals are important, everyone should see them)
+        for ws_id in self.active_connections.keys():
+            await self.send_personal_message(ws_id, {
+                "type": "signal",
+                "data": signal_data
+            })
+            clients_notified += 1
+        
+        logger.info(f"Broadcasted strategy alert for {symbol} to {clients_notified} clients")
+    
     async def start_redis_listener(self):
         """Start listening to Redis pub/sub for candle updates"""
         redis_client = get_redis()
@@ -226,9 +269,9 @@ class ConnectionManager:
         async def listen():
             """Listen for Redis pub/sub messages"""
             pubsub = redis_client.pubsub()
-            pubsub.subscribe("candle_update", "symbol_update", "marketcap_update")
+            pubsub.subscribe("candle_update", "symbol_update", "marketcap_update", "strategy_alert")
             
-            logger.info("Redis listener started for candle, symbol, and marketcap updates")
+            logger.info("Redis listener started for candle, symbol, marketcap, and strategy alert updates")
             
             while True:
                 try:
@@ -276,6 +319,8 @@ class ConnectionManager:
                                 await self.broadcast_symbol_update(data)
                             elif channel == "marketcap_update":
                                 await self.broadcast_marketcap_update(data)
+                            elif channel == "strategy_alert":
+                                await self.broadcast_strategy_alert(data)
                             else:
                                 logger.debug(f"Received message on unknown channel: {channel}")
                                 

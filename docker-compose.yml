@@ -52,6 +52,25 @@ services:
       - ./shared:/app/shared
     restart: unless-stopped
 
+  strategy-engine:
+    build:
+      context: .
+      dockerfile: services/strategy-engine/Dockerfile
+    container_name: trading_strategy
+    environment:
+      - DATABASE_URL=postgresql://trading_user:trading_pass@postgres:5432/trading_db
+      - REDIS_URL=redis://redis:6379/0
+      - LOG_LEVEL=INFO
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./services/strategy-engine:/app
+      - ./shared:/app/shared
+    restart: unless-stopped
+
   api-service:
     build:
       context: .
