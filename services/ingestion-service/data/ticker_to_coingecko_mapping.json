@@ -1,0 +1,24 @@
+{
+  "mappings": {
+    "TNSR": "tensor",
+    "GPS": "goplus-security",
+    "COAI": "chainopera-ai",
+    "0G": "zero-gravity",
+    "BNB": "binancecoin",
+    "UNI": "uni",
+    "FIL": "filecoin",
+    "XRP": "ripple",
+    "BTC": "bitcoin",
+    "AVAX": "avalanche-2",
+    "TRADOOR": "tradoor",
+    "INJ": "injective-protocol",
+    "1000SHIB": "1000shib",
+    "HBAR": "hedera-hashgraph",
+    "FARTCOIN": "fartcoin",
+    "WLFI": "world-liberty-financial",
+    "ETH": "ethereum",
+    "GRASS": "grass",
+    "TRUMP": "official-trump",
+    "ARC": "ai-rig-complex"
+  }
+}

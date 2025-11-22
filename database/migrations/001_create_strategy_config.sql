@@ -22,6 +22,7 @@ CREATE INDEX IF NOT EXISTS idx_strategy_config_key ON strategy_config(config_key
 INSERT INTO strategy_config (config_key, config_value, config_type, description) VALUES
     ('market_data_limit', '200', 'number', 'Limit for number of market data to ingest'),
     ('symbol_limit', '400', 'number', 'Limit for number of symbols to ingest'),
+    ('coingecko_limit', '250', 'number', 'Number of top coins to fetch from CoinGecko by market cap'),
     ('limit_market_cap', '50000000', 'number', 'Minimum market cap filter (USD)'),
     ('limit_volume_up', '50000000', 'number', 'Minimum 24h volume filter (USD)'),
     ('bullish_fib_level_lower', '0.7', 'number', 'Lower bullish Fibonacci entry level'),

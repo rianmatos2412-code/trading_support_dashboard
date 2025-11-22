@@ -4,8 +4,9 @@ CoinGecko ingestion service for fetching market data from CoinGecko API
 import sys
 import os
 import asyncio
-from datetime import datetime
-from typing import List, Dict, Optional
+import json
+from datetime import datetime, timezone
+from typing import List, Dict, Optional, Set
 import aiohttp
 from sqlalchemy.orm import Session
 from sqlalchemy import text
@@ -21,11 +22,14 @@ from shared.redis_client import publish_event
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from utils.circuit_breaker import AsyncCircuitBreaker
 from utils.rate_limiter import COINGECKO_RATE_LIMIT, COINGECKO_MINUTE_LIMIT
-from config.settings import COINGECKO_API_URL
-from database.repository import get_or_create_symbol_record
+from config.settings import COINGECKO_API_URL, COINGECKO_MIN_MARKET_CAP, COINGECKO_MIN_VOLUME_24H
+from database.repository import get_or_create_symbol_record, get_strategy_config_value
 from services.binance_service import BinanceIngestionService
 
 logger = structlog.get_logger(__name__)
+
+# Path to local mapping file
+MAPPING_FILE_PATH = os.path.join(os.path.dirname(__file__), '..', 'data', 'ticker_to_coingecko_mapping.json')
 
 class CoinGeckoIngestionService:
     """Service for ingesting market data from CoinGecko API"""
@@ -38,6 +42,7 @@ class CoinGeckoIngestionService:
             recovery_timeout=60,
             expected_exception=(aiohttp.ClientError, asyncio.TimeoutError, Exception)
         )
+        self._mapping_cache: Optional[Dict[str, str]] = None
     
     async def __aenter__(self):
         self.session = aiohttp.ClientSession()
@@ -125,7 +130,7 @@ class CoinGeckoIngestionService:
         binance_service: Optional[BinanceIngestionService] = None,
         create_symbols: bool = True
     ):
-        """Save market metrics to database, using Binance ticker for price and volume_24h data
+        """Save market metrics to database using CoinGecko data
         
         Args:
             create_symbols: If True, creates new symbols if they don't exist.
@@ -136,16 +141,12 @@ class CoinGeckoIngestionService:
             skipped_count = 0
             current_timestamp = datetime.now()
             
-            # Fetch all ticker data from Binance once (much faster than individual requests)
-            binance_tickers = {}
-            if binance_service:
-                logger.info("Fetching all ticker data from Binance...")
-                binance_tickers = await binance_service.fetch_all_tickers_24h()
-                logger.info(f"Retrieved {len(binance_tickers)} tickers from Binance")
-            
             for coin in coins_data:
                 try:
-                    symbol = self.map_coin_to_symbol(coin)
+                    # Use Binance symbol if available (from new ingestion flow), otherwise map from coin data
+                    symbol = coin.get("_binance_symbol")
+                    if not symbol:
+                        symbol = self.map_coin_to_symbol(coin)
                     if not symbol:
                         skipped_count += 1
                         continue
@@ -169,23 +170,9 @@ class CoinGeckoIngestionService:
                     
                     # Extract market data from CoinGecko
                     market_cap = coin.get("market_cap")
-                    volume_24h = coin.get("total_volume")  # Fallback to CoinGecko volume
+                    volume_24h = coin.get("total_volume")
                     circulating_supply = coin.get("circulating_supply")
-                    price = coin.get("current_price")  # Fallback to CoinGecko price
-                    
-                    # Get price and volume from Binance ticker data (already fetched, just lookup)
-                    if binance_service and symbol in binance_tickers:
-                        ticker = binance_tickers[symbol]
-                        # Use Binance price (lastPrice)
-                        if ticker.get("lastPrice"):
-                            price = float(ticker.get("lastPrice"))
-                            logger.debug(f"Using Binance price for {symbol}: {price}")
-                        
-                        # Use Binance volume (quoteVolume is in USDT, volume is in base asset)
-                        # Prefer quoteVolume as it's in USDT which matches our volume_24h field
-                        if ticker.get("quoteVolume"):
-                            volume_24h = float(ticker.get("quoteVolume"))
-                            logger.debug(f"Using Binance volume_24h for {symbol}: {volume_24h}")
+                    price = coin.get("current_price")
                     
                     # Skip if essential data is missing
                     if market_cap is None and volume_24h is None and circulating_supply is None and price is None:
@@ -215,14 +202,11 @@ class CoinGeckoIngestionService:
                     saved_count += 1
                     
                     # Publish marketcap_update event for real-time market cap and volume updates
-                    # Note: Price is excluded - it comes from real-time Binance ticker streams
-                    # Only market_cap and volume_24h are updated from periodic CoinGecko updates
                     try:
                         publish_event("marketcap_update", {
                             "symbol": symbol,
                             "marketcap": float(market_cap) if market_cap else None,
                             "volume_24h": float(volume_24h) if volume_24h else None,
-                            # Price is NOT included - comes from real-time Binance WebSocket ticker streams
                             "timestamp": current_timestamp.isoformat()
                         })
                     except Exception as e:
@@ -353,4 +337,395 @@ class CoinGeckoIngestionService:
         # Save to database
         with DatabaseManager() as db:
             await self.save_market_metrics(db, coins_data, binance_service=binance_service)
+    
+    def extract_base_asset(self, symbol: str) -> Optional[str]:
+        """Extract base asset from Binance symbol (e.g., BTC from BTCUSDT)"""
+        if symbol.endswith("USDT"):
+            return symbol[:-4]
+        return None
+    
+    def normalize_base_asset(self, base_asset: str) -> str:
+        """Normalize base asset by removing common multiplier prefixes.
+        
+        Binance often uses multiplier prefixes (1000, 100, 10) for tokens with small unit prices.
+        This function removes these prefixes to match with CoinGecko ticker symbols.
+        
+        Examples:
+            "1000PEPE" -> "PEPE"
+            "100SHIB" -> "SHIB"
+            "10LUNC" -> "LUNC"
+            "BTC" -> "BTC" (no change)
+        
+        Args:
+            base_asset: Base asset string, may contain multiplier prefix
+            
+        Returns:
+            Normalized base asset without multiplier prefix
+        """
+        base_upper = base_asset.upper()
+        
+        # Common multiplier prefixes used by Binance
+        multipliers = ["1000000", "1000",  "10"]
+        
+        for multiplier in multipliers:
+            if base_upper.startswith(multiplier):
+                # Check if the rest is a valid ticker (at least 2 chars)
+                remaining = base_upper[len(multiplier):]
+                if len(remaining) >= 2:
+                    return remaining
+        
+        return base_upper
+    
+    def load_ticker_mapping(self) -> Dict[str, str]:
+        """Load ticker to CoinGecko coin ID mapping from local file"""
+        if self._mapping_cache is not None:
+            return self._mapping_cache
+        
+        try:
+            if os.path.exists(MAPPING_FILE_PATH):
+                with open(MAPPING_FILE_PATH, 'r') as f:
+                    data = json.load(f)
+                    self._mapping_cache = data.get("mappings", {})
+                    return self._mapping_cache
+            else:
+                # Create empty mapping file if it doesn't exist
+                os.makedirs(os.path.dirname(MAPPING_FILE_PATH), exist_ok=True)
+                with open(MAPPING_FILE_PATH, 'w') as f:
+                    json.dump({"mappings": {}}, f, indent=2)
+                self._mapping_cache = {}
+                return {}
+        except Exception as e:
+            logger.error(f"Error loading ticker mapping: {e}")
+            self._mapping_cache = {}
+            return {}
+    
+    def save_ticker_mapping(self, ticker: str, coin_id: str):
+        """Save ticker to CoinGecko coin ID mapping to local file"""
+        try:
+            mapping = self.load_ticker_mapping()
+            mapping[ticker.upper()] = coin_id
+            self._mapping_cache = mapping
+            
+            os.makedirs(os.path.dirname(MAPPING_FILE_PATH), exist_ok=True)
+            with open(MAPPING_FILE_PATH, 'w') as f:
+                json.dump({"mappings": mapping}, f, indent=2)
+            
+            logger.info(f"Updated mapping: {ticker.upper()} -> {coin_id}")
+        except Exception as e:
+            logger.error(f"Error saving ticker mapping: {e}")
+    
+    async def _search_coin_by_ticker_impl(self, ticker: str) -> Optional[Dict]:
+        """Search for coin by ticker using CoinGecko search endpoint"""
+        url = f"{self.base_url}/search"
+        params = {"query": ticker}
+        
+        try:
+            async with COINGECKO_RATE_LIMIT:
+                async with COINGECKO_MINUTE_LIMIT:
+                    async with self.session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            coins = data.get("coins", [])
+                            
+                            # Try to find exact match by ticker (case-insensitive)
+                            ticker_upper = ticker.upper()
+                            for coin in coins:
+                                if coin.get("symbol", "").upper() == ticker_upper:
+                                    return coin
+                            
+                            # If no exact match, return first result if available
+                            if coins:
+                                return coins[0]
+                            
+                            return None
+                        elif response.status == 429:
+                            logger.warning("Rate limited by CoinGecko search, waiting 60 seconds...")
+                            await asyncio.sleep(60)
+                            return None
+                        else:
+                            logger.debug(f"CoinGecko search failed for {ticker}: {response.status}")
+                            return None
+        except Exception as e:
+            logger.debug(f"Error searching CoinGecko for {ticker}: {e}")
+            return None
+    
+    async def search_coin_by_ticker(self, ticker: str) -> Optional[Dict]:
+        """Search for coin by ticker with circuit breaker protection"""
+        try:
+            return await self.circuit_breaker.call(self._search_coin_by_ticker_impl, ticker)
+        except Exception as e:
+            logger.debug(f"Error searching coin by ticker {ticker}: {e}")
+            return None
+    
+    async def _fetch_coin_by_id_impl(self, coin_id: str) -> Optional[Dict]:
+        """Fetch coin market data by CoinGecko ID"""
+        url = f"{self.base_url}/coins/markets"
+        params = {
+            "vs_currency": "usd",
+            "ids": coin_id,
+            "sparkline": "false"
+        }
+        
+        try:
+            async with COINGECKO_RATE_LIMIT:
+                async with COINGECKO_MINUTE_LIMIT:
+                    async with self.session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            if data and len(data) > 0:
+                                return data[0]
+                            return None
+                        elif response.status == 429:
+                            logger.warning("Rate limited by CoinGecko, waiting 60 seconds...")
+                            await asyncio.sleep(60)
+                            return None
+                        else:
+                            logger.debug(f"CoinGecko fetch failed for {coin_id}: {response.status}")
+                            return None
+        except Exception as e:
+            logger.debug(f"Error fetching coin by ID {coin_id}: {e}")
+            return None
+    
+    async def fetch_coin_by_id(self, coin_id: str) -> Optional[Dict]:
+        """Fetch coin market data by CoinGecko ID with circuit breaker protection"""
+        try:
+            return await self.circuit_breaker.call(self._fetch_coin_by_id_impl, coin_id)
+        except Exception as e:
+            logger.debug(f"Error fetching coin by ID {coin_id}: {e}")
+            return None
+    
+    async def enrich_asset_with_coingecko(self, ticker: str) -> Optional[Dict]:
+        """Enrich asset with CoinGecko data using multiple strategies:
+        1. Use local mapping file (most reliable, already confirmed)
+        2. Use CoinGecko search endpoint (comprehensive search)
+        3. Try direct match by ticker (fallback, rarely works)
+        4. If new mapping is confirmed from search, update mapping file
+        """
+        ticker_upper = ticker.upper()
+        
+        # Strategy 1: Use local mapping file (most reliable)
+        mapping = self.load_ticker_mapping()
+        coin_id_from_mapping = mapping.get(ticker_upper)
+        if coin_id_from_mapping:
+            coin_data = await self.fetch_coin_by_id(coin_id_from_mapping)
+            if coin_data:
+                # Verify the symbol matches
+                if coin_data.get("symbol", "").upper() == ticker_upper:
+                    logger.debug(f"Mapping match found for {ticker}: {coin_id_from_mapping}")
+                    return coin_data
+        
+        # Strategy 2: Use CoinGecko search endpoint
+        search_result = await self.search_coin_by_ticker(ticker)
+        if search_result:
+            # Fetch full market data using the coin ID from search
+            coin_id_from_search = search_result.get("id")
+            if coin_id_from_search:
+                coin_data = await self.fetch_coin_by_id(coin_id_from_search)
+                if coin_data:
+                    # Verify the symbol matches
+                    if coin_data.get("symbol", "").upper() == ticker_upper:
+                        logger.debug(f"Search match found for {ticker}: {coin_id_from_search}")
+                        # Update mapping file with confirmed mapping
+                        self.save_ticker_mapping(ticker, coin_id_from_search)
+                        return coin_data
+        
+        # Strategy 3: Try direct match by ticker (coin ID is usually lowercase ticker, rarely works)
+        coin_id_direct = ticker_upper.lower()
+        coin_data = await self.fetch_coin_by_id(coin_id_direct)
+        if coin_data:
+            # Verify the symbol matches
+            if coin_data.get("symbol", "").upper() == ticker_upper:
+                logger.debug(f"Direct match found for {ticker}: {coin_id_direct}")
+                # Update mapping file with confirmed mapping
+                self.save_ticker_mapping(ticker, coin_id_direct)
+                return coin_data
+        
+        logger.debug(f"No CoinGecko data found for {ticker}")
+        return None
+    
+    async def ingest_from_binance_perpetuals(
+        self, 
+        binance_service: BinanceIngestionService,
+        min_binance_volume: Optional[float] = None,
+        min_market_cap: Optional[float] = None
+    ) -> List[Dict]:
+        """New ingestion flow:
+        1. Fetch Binance USDT perpetual futures (primary universe)
+        2. Fetch top 200-300 coins from CoinGecko ordered by market cap
+        3. Match CoinGecko coins to Binance symbols
+        4. Apply filters (Binance 24h volume > threshold, CoinGecko market cap > threshold)
+        5. Return final asset universe
+        
+        Args:
+            binance_service: Binance service instance
+            min_binance_volume: Minimum Binance 24h volume (USD). If None, fetched from database.
+            min_market_cap: Minimum CoinGecko market cap (USD). If None, fetched from database.
+        """
+        logger.info("Starting new ingestion flow: Binance perpetuals -> CoinGecko enrichment")
+        
+        # Get filter thresholds and limits from database if not provided
+        with DatabaseManager() as db:
+            if min_binance_volume is None:
+                db_value = get_strategy_config_value(
+                    db, 
+                    "limit_volume_up", 
+                    default_value=COINGECKO_MIN_VOLUME_24H
+                )
+                min_binance_volume = db_value if db_value is not None else COINGECKO_MIN_VOLUME_24H
+                logger.info(f"Loaded min_binance_volume from database: {min_binance_volume}")
+            
+            if min_market_cap is None:
+                db_value = get_strategy_config_value(
+                    db,
+                    "limit_market_cap",
+                    default_value=COINGECKO_MIN_MARKET_CAP
+                )
+                min_market_cap = db_value if db_value is not None else COINGECKO_MIN_MARKET_CAP
+                logger.info(f"Loaded min_market_cap from database: {min_market_cap}")
+            
+            # Get CoinGecko limit from database
+            db_value = get_strategy_config_value(
+                db,
+                "coingecko_limit",
+                default_value=250.0
+            )
+            coingecko_limit = int(db_value) if db_value is not None else 250
+            logger.info(f"Loaded coingecko_limit from database: {coingecko_limit}")
+        
+        # Step 1: Fetch Binance USDT perpetual futures
+        perpetual_symbols = await binance_service.get_available_perpetual_symbols()
+        if not perpetual_symbols:
+            logger.warning("No Binance perpetual symbols found")
+            return []
+        
+        # Filter to only USDT pairs
+        usdt_symbols = [s for s in perpetual_symbols if s.endswith("USDT")]
+        logger.info(f"Found {len(usdt_symbols)} USDT perpetual symbols on Binance")
+        
+        # Step 2: Fetch Binance ticker data for volume filtering
+        binance_tickers = await binance_service.fetch_all_tickers_24h()
+        logger.info(f"Retrieved {len(binance_tickers)} tickers from Binance")
+        
+        # Create a mapping of normalized base asset to Binance symbol for quick lookup
+        # This handles cases like "1000PEPE" (Binance) matching "PEPE" (CoinGecko)
+        base_asset_to_symbol = {}
+        for symbol in usdt_symbols:
+            base_asset = self.extract_base_asset(symbol)
+            if base_asset:
+                normalized = self.normalize_base_asset(base_asset)
+                # Store normalized key (primary lookup)
+                base_asset_to_symbol[normalized] = symbol
+                # Also store original in case it's needed for exact matches
+                if normalized != base_asset.upper():
+                    base_asset_to_symbol[base_asset.upper()] = symbol
+        
+        logger.info(f"Created base asset mapping: {len(base_asset_to_symbol)} entries")
+        
+        # Step 3: Fetch top coins from CoinGecko ordered by market cap
+        # coingecko_limit is already loaded from database above
+        logger.info(f"Fetching top {coingecko_limit} coins from CoinGecko by market cap")
+        top_coins = await self.fetch_top_market_metrics(limit=coingecko_limit)
+        
+        if not top_coins:
+            logger.warning("No coins fetched from CoinGecko")
+            return []
+        
+        logger.info(f"Fetched {len(top_coins)} coins from CoinGecko")
+        
+        # Step 4: Match CoinGecko coins to Binance symbols and apply filters
+        enriched_assets = []
+        skipped_no_binance_match = 0
+        skipped_volume_filter = 0
+        skipped_market_cap_filter = 0
+        
+        for coin_data in top_coins:
+            try:
+                # Get ticker symbol from CoinGecko data
+                coin_symbol = coin_data.get("symbol", "").upper()
+                if not coin_symbol:
+                    continue
+                
+                # Normalize CoinGecko symbol for matching (handles multiplier prefix cases)
+                normalized_coin_symbol = self.normalize_base_asset(coin_symbol)
+                
+                # Find matching Binance symbol (try normalized first, then original)
+                binance_symbol = base_asset_to_symbol.get(normalized_coin_symbol)
+                if not binance_symbol:
+                    # Fallback to original symbol in case of exact match
+                    binance_symbol = base_asset_to_symbol.get(coin_symbol)
+                
+                if not binance_symbol:
+                    skipped_no_binance_match += 1
+                    continue
+                
+                # Get Binance ticker data for volume check
+                ticker_data = binance_tickers.get(binance_symbol)
+                if not ticker_data:
+                    skipped_no_binance_match += 1
+                    continue
+                
+                # Apply Binance volume filter
+                quote_volume = ticker_data.get("quoteVolume")
+                if quote_volume is None or float(quote_volume) < min_binance_volume:
+                    skipped_volume_filter += 1
+                    continue
+                
+                # Apply CoinGecko market cap filter
+                market_cap = coin_data.get("market_cap")
+                if market_cap is None or float(market_cap) < min_market_cap:
+                    skipped_market_cap_filter += 1
+                    continue
+                
+                # Add symbol to coin_data for mapping
+                coin_data["_binance_symbol"] = binance_symbol
+                coin_data["_base_asset"] = coin_symbol
+                
+                enriched_assets.append(coin_data)
+                
+            except Exception as e:
+                logger.error(f"Error processing coin {coin_data.get('id', 'unknown')}: {e}")
+                continue
+        
+        logger.info(
+            "ingestion_completed",
+            total_binance_symbols=len(usdt_symbols),
+            coingecko_coins_fetched=len(top_coins),
+            enriched_count=len(enriched_assets),
+            skipped_no_binance_match=skipped_no_binance_match,
+            skipped_volume_filter=skipped_volume_filter,
+            skipped_market_cap_filter=skipped_market_cap_filter
+        )
+        
+        return enriched_assets
+    
+    async def ingest_from_binance_perpetuals_and_save(
+        self,
+        binance_service: BinanceIngestionService,
+        min_binance_volume: Optional[float] = None,
+        min_market_cap: Optional[float] = None
+    ):
+        """Ingest from Binance perpetuals, enrich with CoinGecko, and save to database"""
+        logger.info("Starting new ingestion flow with database save")
+        
+        # Get enriched assets
+        enriched_assets = await self.ingest_from_binance_perpetuals(
+            binance_service=binance_service,
+            min_binance_volume=min_binance_volume,
+            min_market_cap=min_market_cap
+        )
+        
+        if not enriched_assets:
+            logger.warning("No enriched assets to save")
+            return
+        
+        # Save to database
+        with DatabaseManager() as db:
+            await self.save_market_metrics(
+                db, 
+                enriched_assets, 
+                binance_service=binance_service,
+                create_symbols=True
+            )
+        
+        logger.info(f"Successfully saved {len(enriched_assets)} assets to database")
 

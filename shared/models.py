@@ -11,6 +11,21 @@ import json
 Base = declarative_base()
 
 
+class Symbol(Base):
+    """Symbol model with soft-delete support"""
+    __tablename__ = "symbols"
+    
+    symbol_id = Column(Integer, primary_key=True, index=True)
+    symbol_name = Column(String(20), unique=True, nullable=False, index=True)
+    base_asset = Column(String(20), nullable=False)
+    quote_asset = Column(String(20), nullable=False)
+    image_path = Column(String(500), nullable=True)
+    is_active = Column(Boolean, nullable=False, default=True, index=True)
+    removed_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class OHLCVCandle(Base):
     __tablename__ = "ohlcv_candles"
     
