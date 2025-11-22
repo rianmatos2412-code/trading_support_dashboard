@@ -5,7 +5,7 @@ import sys
 import os
 import asyncio
 import json
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 from datetime import datetime
 from fastapi import FastAPI, HTTPException, Depends, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -550,6 +550,88 @@ async def get_symbols(db: Session = Depends(get_db)):
             return symbols
     except Exception as e:
         logger.error(f"Error getting symbols: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Strategy Configuration endpoints
+class StrategyConfigResponse(BaseModel):
+    config_key: str
+    config_value: str
+    config_type: str
+    description: Optional[str]
+    updated_at: Optional[datetime]
+    updated_by: Optional[str]
+    
+    class Config:
+        from_attributes = True
+
+
+class StrategyConfigUpdate(BaseModel):
+    config_value: str
+
+
+class StrategyConfigBulkUpdate(BaseModel):
+    configs: Dict[str, str]
+
+
+@app.get("/strategy-config", response_model=Dict[str, Any])
+async def get_strategy_config(
+    config_key: Optional[str] = Query(None, description="Get specific config key"),
+    db: Session = Depends(get_db)
+):
+    """Get strategy configuration values"""
+    try:
+        with StorageService() as storage:
+            configs = storage.get_strategy_config(config_key)
+            return configs
+    except Exception as e:
+        logger.error(f"Error getting strategy config: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/strategy-config/{config_key}")
+async def update_strategy_config(
+    config_key: str,
+    config_update: StrategyConfigUpdate,
+    db: Session = Depends(get_db)
+):
+    """Update a strategy configuration value"""
+    try:
+        with StorageService() as storage:
+            success = storage.update_strategy_config(
+                config_key=config_key,
+                config_value=config_update.config_value,
+                updated_by="api-service"  # Could be enhanced to track user
+            )
+            if not success:
+                raise HTTPException(status_code=500, detail="Failed to update config")
+            return {"success": True, "config_key": config_key, "config_value": config_update.config_value}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating strategy config: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/strategy-config")
+async def update_strategy_configs(
+    bulk_update: StrategyConfigBulkUpdate,
+    db: Session = Depends(get_db)
+):
+    """Update multiple strategy configuration values at once"""
+    try:
+        with StorageService() as storage:
+            success = storage.update_strategy_configs(
+                configs=bulk_update.configs,
+                updated_by="api-service"  # Could be enhanced to track user
+            )
+            if not success:
+                raise HTTPException(status_code=500, detail="Failed to update configs")
+            return {"success": True, "updated_count": len(bulk_update.configs)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating strategy configs: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

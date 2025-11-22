@@ -18,8 +18,10 @@ import pandas as pd
 sys.path.append(os.path.join(os.path.dirname(__file__), '../../'))
 
 from shared.config import STRATEGY_CANDLE_COUNT
+from shared.storage import StorageService
 from swing_high_low import calculate_swing_points, filter_between, filter_rate
 import support_resistance
+import json
 
 
 @dataclass
@@ -47,37 +49,76 @@ class ConfirmedFibResult(FibResult):
 
 class StrategyInterface:
     def __init__(self):
+        # Load configuration from database, with fallback to defaults
+        self._load_config_from_db()
         
-        self.candle_counts_for_support_resistance = STRATEGY_CANDLE_COUNT
-
-        self.bullish_fib_level_lower = 0.7 
-        self.bullish_fib_level_higher = 0.72
-        self.bullish_sl_fib_level = 0.9
-
-        self.bearish_fib_level = 0.618
-        self.bearish_sl_fib_level = 0.786
-
-        self.tp1_fib_level = 0.5
-        self.tp2_fib_level = 0.382
-        self.tp3_fib_level = 0.236
-
-        self.candle_counts_for_swing_high_low = 200
-        self.sensible_window = 2
-        self.swing_window = 7
-
-        self.swing_high_low_pruning_score = {
-            'BTCUSDT': 0.015,
-            'ETHUSDT': 0.015,
-            'SOLUSDT': 0.02,
-            'OTHER': 0.03
-        }
-
+    def _load_config_from_db(self):
+        """Load configuration values from database, with fallback to defaults"""
+        try:
+            with StorageService() as storage:
+                configs = storage.get_strategy_config()
+                
+                # Load values from database, with defaults as fallback
+                self.bullish_fib_level_lower = configs.get('bullish_fib_level_lower', 0.7)
+                self.bullish_fib_level_higher = configs.get('bullish_fib_level_higher', 0.72)
+                self.bullish_sl_fib_level = configs.get('bullish_sl_fib_level', 0.9)
+                
+                self.bearish_fib_level = configs.get('bearish_fib_level', 0.618)
+                self.bearish_sl_fib_level = configs.get('bearish_sl_fib_level', 0.786)
+                
+                self.tp1_fib_level = configs.get('tp1_fib_level', 0.5)
+                self.tp2_fib_level = configs.get('tp2_fib_level', 0.382)
+                self.tp3_fib_level = configs.get('tp3_fib_level', 0.236)
+                
+                self.candle_counts_for_swing_high_low = configs.get('candle_counts_for_swing_high_low', 200)
+                self.sensible_window = configs.get('sensible_window', 2)
+                self.swing_window = configs.get('swing_window', 7)
+                
+                # Load pruning scores (JSON object)
+                pruning_scores = configs.get('swing_high_low_pruning_score', {
+                    'BTCUSDT': 0.015,
+                    'ETHUSDT': 0.015,
+                    'SOLUSDT': 0.02,
+                    'OTHER': 0.03
+                })
+                if isinstance(pruning_scores, str):
+                    pruning_scores = json.loads(pruning_scores)
+                self.swing_high_low_pruning_score = pruning_scores
+                
+                # Use STRATEGY_CANDLE_COUNT for support/resistance
+                self.candle_counts_for_support_resistance = STRATEGY_CANDLE_COUNT
+                
+        except Exception as e:
+            # Fallback to defaults if database load fails
+            print(f"Warning: Failed to load config from database: {e}. Using defaults.")
+            self.bullish_fib_level_lower = 0.7 
+            self.bullish_fib_level_higher = 0.72
+            self.bullish_sl_fib_level = 0.9
+            self.bearish_fib_level = 0.618
+            self.bearish_sl_fib_level = 0.786
+            self.tp1_fib_level = 0.5
+            self.tp2_fib_level = 0.382
+            self.tp3_fib_level = 0.236
+            self.candle_counts_for_swing_high_low = 200
+            self.sensible_window = 2
+            self.swing_window = 7
+            self.swing_high_low_pruning_score = {
+                'BTCUSDT': 0.015,
+                'ETHUSDT': 0.015,
+                'SOLUSDT': 0.02,
+                'OTHER': 0.03
+            }
+            self.candle_counts_for_support_resistance = STRATEGY_CANDLE_COUNT
+        
+        # These are not in the database yet, keep as defaults
         self.bearish_alert_level = 0.5
         self.bullish_alert_level = 0.618
-
         self.swing_sup_res_tolerance_pct = 0.01
         self.approaching_tolerance_pct = 0.01
-
+    
+    def reload_config(self):
+        """Reload configuration from database (useful for hot-reloading)"""
+        self._load_config_from_db()
         
         
     def get_candle(self, timeframe_ticker_df: Optional[pd.DataFrame], candle_counts: int) -> Optional[pd.DataFrame]:

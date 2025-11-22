@@ -10,7 +10,7 @@ from sqlalchemy import desc, and_, text
 
 from shared.database import SessionLocal
 from shared.models import (
-    OHLCVCandle, StrategyAlert
+    OHLCVCandle, StrategyAlert, StrategyConfig
 )
 from shared.logger import setup_logger
 
@@ -403,6 +403,107 @@ class StorageService:
         except Exception as e:
             logger.error(f"Error getting symbols with prices: {e}")
             return []
+
+    def get_strategy_config(self, config_key: Optional[str] = None) -> Dict:
+        """Get strategy configuration values from database"""
+        try:
+            if config_key:
+                # Get single config value
+                config = self.db.query(StrategyConfig).filter(StrategyConfig.config_key == config_key).first()
+                if not config:
+                    return {}
+                
+                # Parse value based on type
+                value = config.config_value
+                if config.config_type == 'number':
+                    # Try to parse as float first, then int
+                    try:
+                        if '.' in value:
+                            value = float(value)
+                        else:
+                            value = int(value)
+                    except ValueError:
+                        pass
+                elif config.config_type == 'json':
+                    import json
+                    value = json.loads(value)
+                
+                return {config_key: value}
+            else:
+                # Get all config values
+                configs = self.db.query(StrategyConfig).all()
+                result = {}
+                for config in configs:
+                    value = config.config_value
+                    if config.config_type == 'number':
+                        try:
+                            if '.' in value:
+                                value = float(value)
+                            else:
+                                value = int(value)
+                        except ValueError:
+                            pass
+                    elif config.config_type == 'json':
+                        import json
+                        value = json.loads(value)
+                    result[config.config_key] = value
+                return result
+        except Exception as e:
+            logger.error(f"Error getting strategy config: {e}")
+            return {}
+
+    def update_strategy_config(self, config_key: str, config_value: str, updated_by: Optional[str] = None) -> bool:
+        """Update a strategy configuration value"""
+        try:
+            config = self.db.query(StrategyConfig).filter(StrategyConfig.config_key == config_key).first()
+            if config:
+                config.config_value = str(config_value)
+                config.updated_by = updated_by
+                config.updated_at = datetime.utcnow()
+            else:
+                # Create new config entry
+                config = StrategyConfig(
+                    config_key=config_key,
+                    config_value=str(config_value),
+                    config_type='string',
+                    updated_by=updated_by
+                )
+                self.db.add(config)
+            
+            self.db.commit()
+            logger.info(f"Updated strategy config: {config_key} = {config_value}")
+            return True
+        except Exception as e:
+            logger.error(f"Error updating strategy config: {e}")
+            self.db.rollback()
+            return False
+
+    def update_strategy_configs(self, configs: Dict[str, str], updated_by: Optional[str] = None) -> bool:
+        """Update multiple strategy configuration values"""
+        try:
+            for config_key, config_value in configs.items():
+                config = self.db.query(StrategyConfig).filter(StrategyConfig.config_key == config_key).first()
+                if config:
+                    config.config_value = str(config_value)
+                    config.updated_by = updated_by
+                    config.updated_at = datetime.utcnow()
+                else:
+                    # Create new config entry
+                    config = StrategyConfig(
+                        config_key=config_key,
+                        config_value=str(config_value),
+                        config_type='string',
+                        updated_by=updated_by
+                    )
+                    self.db.add(config)
+            
+            self.db.commit()
+            logger.info(f"Updated {len(configs)} strategy configs")
+            return True
+        except Exception as e:
+            logger.error(f"Error updating strategy configs: {e}")
+            self.db.rollback()
+            return False
 
 
 

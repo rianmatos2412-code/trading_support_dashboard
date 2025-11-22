@@ -86,3 +86,14 @@ class StrategyAlert(Base):
     __table_args__ = (
         CheckConstraint("direction IN ('long', 'short')", name="check_strategy_alert_direction"),
     )
+
+
+class StrategyConfig(Base):
+    __tablename__ = "strategy_config"
+    
+    config_key = Column(String(100), primary_key=True, index=True)
+    config_value = Column(Text, nullable=False)
+    config_type = Column(String(20), nullable=False, default='string')
+    description = Column(Text, nullable=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    updated_by = Column(String(100), nullable=True)
