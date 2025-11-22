@@ -17,6 +17,7 @@ from shared.database import init_db, DatabaseManager, SessionLocal
 from shared.redis_client import get_redis
 from shared.logger import setup_logger
 from shared.storage import StorageService
+from shared.config import STRATEGY_CANDLE_COUNT
 from sqlalchemy import text
 
 from strategy import RunStrategy
@@ -136,9 +137,9 @@ async def process_candle_update(candle_data: dict, strategy: RunStrategy):
         logger.info("processing_candle_update", symbol=symbol, timeframe=timeframe)
         
         # Fetch candle data from database
-        df_4h = get_candles_from_db(symbol, "4h", limit=400)
-        df_30m = get_candles_from_db(symbol, "30m", limit=400)
-        df_1h = get_candles_from_db(symbol, "1h", limit=400)  # Always fetch 1h for support/resistance
+        df_4h = get_candles_from_db(symbol, "4h", limit=STRATEGY_CANDLE_COUNT)
+        df_30m = get_candles_from_db(symbol, "30m", limit=STRATEGY_CANDLE_COUNT)
+        df_1h = get_candles_from_db(symbol, "1h", limit=STRATEGY_CANDLE_COUNT)  # Always fetch 1h for support/resistance
         
         # Get latest close price
         latest_close_price = float(candle_data.get("close", 0))
@@ -210,9 +211,9 @@ async def initialize_strategy_alerts():
                 logger.debug("processing_symbol_for_initialization", symbol=symbol)
                 
                 # Fetch candle data
-                df_4h = get_candles_from_db(symbol, "4h", limit=400) if has_4h else None
-                df_30m = get_candles_from_db(symbol, "30m", limit=400) if has_30m else None
-                df_1h = get_candles_from_db(symbol, "1h", limit=400)  # Always fetch 1h for support/resistance
+                df_4h = get_candles_from_db(symbol, "4h", limit=STRATEGY_CANDLE_COUNT) if has_4h else None
+                df_30m = get_candles_from_db(symbol, "30m", limit=STRATEGY_CANDLE_COUNT) if has_30m else None
+                df_1h = get_candles_from_db(symbol, "1h", limit=STRATEGY_CANDLE_COUNT)  # Always fetch 1h for support/resistance
                 
                 # Validate we have required data
                 # Need at least one of 4h or 30m, and 1h for support/resistance

@@ -234,10 +234,26 @@ class ConnectionManager:
             else:
                 timestamp = str(timestamp)
         
+        # Extract swing timestamps and ensure they're in ISO format
+        swing_low_timestamp = alert_data.get("swing_low_timestamp")
+        if swing_low_timestamp and not isinstance(swing_low_timestamp, str):
+            if hasattr(swing_low_timestamp, 'isoformat'):
+                swing_low_timestamp = swing_low_timestamp.isoformat()
+            else:
+                swing_low_timestamp = str(swing_low_timestamp)
+        
+        swing_high_timestamp = alert_data.get("swing_high_timestamp")
+        if swing_high_timestamp and not isinstance(swing_high_timestamp, str):
+            if hasattr(swing_high_timestamp, 'isoformat'):
+                swing_high_timestamp = swing_high_timestamp.isoformat()
+            else:
+                swing_high_timestamp = str(swing_high_timestamp)
+        
         # Map strategy_alert to TradingSignal format expected by frontend
         signal_data = {
             "id": alert_data.get("id"),
             "symbol": symbol,
+            "timeframe": timeframe,  # Include timeframe
             "timestamp": timestamp or datetime.now().isoformat(),
             "market_score": 0,  # Not available in strategy_alerts, default to 0
             "direction": alert_data.get("direction", "long"),
@@ -249,7 +265,9 @@ class ConnectionManager:
             "tp2": alert_data.get("take_profit_2"),
             "tp3": alert_data.get("take_profit_3"),
             "swing_high": alert_data.get("swing_high_price"),
+            "swing_high_timestamp": swing_high_timestamp,  # Add swing high timestamp
             "swing_low": alert_data.get("swing_low_price"),
+            "swing_low_timestamp": swing_low_timestamp,  # Add swing low timestamp
             "support_level": None,  # Not available in strategy_alerts
             "resistance_level": None,  # Not available in strategy_alerts
             "confluence": alert_data.get("risk_score"),  # Use risk_score as confluence

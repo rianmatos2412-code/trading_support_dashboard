@@ -37,6 +37,7 @@ class BinanceWebSocketService:
         self.ws_url = "wss://fstream.binance.com/ws"
         self.ws_stream_url = "wss://fstream.binance.com/stream"  # For multi-stream
         self.websocket = None
+        self.websockets = []  # List of WebSocket connections for multiple batches
         self.reconnect_delay = 1  # Start with 1 second
         self.max_reconnect_delay = WS_MAX_RECONNECT_DELAY
         self.is_connected = False
@@ -50,6 +51,7 @@ class BinanceWebSocketService:
         self.batch_timeout = WS_BATCH_TIMEOUT
         self.total_batches_flushed = 0
         self.total_candles_batched = 0
+        self.max_url_length = 2000  # Maximum URL length (leaving room for base URL)
         
     async def __aenter__(self):
         return self
@@ -58,11 +60,25 @@ class BinanceWebSocketService:
         await self.close()
     
     async def close(self):
-        """Close WebSocket connection"""
+        """Close all WebSocket connections"""
+        # Close single connection if it exists
         if self.websocket:
-            await self.websocket.close()
-            self.is_connected = False
-            logger.info("WebSocket connection closed")
+            try:
+                await self.websocket.close()
+            except Exception as e:
+                logger.debug(f"Error closing WebSocket: {e}")
+            self.websocket = None
+        
+        # Close all batch connections
+        for ws in self.websockets:
+            try:
+                await ws.close()
+            except Exception as e:
+                logger.debug(f"Error closing WebSocket batch connection: {e}")
+        
+        self.websockets = []
+        self.is_connected = False
+        logger.info("All WebSocket connections closed")
     
     def map_timeframe_to_binance_interval(self, timeframe: str) -> str:
         """Map our timeframe format to Binance interval format
@@ -122,6 +138,57 @@ class BinanceWebSocketService:
         # Multi-stream format: ?streams=stream1/stream2/stream3
         streams_str = "/".join(streams)
         return f"{self.ws_stream_url}?streams={streams_str}"
+    
+    def build_stream_batches(self, symbols: List[str], timeframes: List[str]) -> List[Tuple[List[str], List[str]]]:
+        """
+        Split symbols into batches that fit within URL length limit.
+        
+        Calculates actual URL length for each batch to ensure it stays within limits.
+        
+        Args:
+            symbols: List of symbols to subscribe to
+            timeframes: List of timeframes to subscribe to
+            
+        Returns:
+            List of tuples (symbol_batch, timeframe_list) where each batch fits in URL length limit
+        """
+        batches = []
+        base_url_length = len(self.ws_stream_url) + len("?streams=")
+        
+        current_batch_symbols = []
+        
+        for symbol in symbols:
+            # Try adding this symbol to current batch
+            test_symbols = current_batch_symbols + [symbol]
+            
+            # Build streams for test batch
+            test_streams = []
+            for s in test_symbols:
+                # Add kline streams for this symbol
+                for timeframe in timeframes:
+                    test_streams.append(self.build_stream_name(s, timeframe))
+                # Add ticker stream for this symbol
+                test_streams.append(self.build_ticker_stream_name(s))
+            
+            # Build test URL
+            streams_str = "/".join(test_streams)
+            test_url = f"{self.ws_stream_url}?streams={streams_str}"
+            test_url_length = len(test_url)
+            
+            # Check if test URL exceeds limit
+            if test_url_length > self.max_url_length and current_batch_symbols:
+                # Current batch is full, save it and start new one
+                batches.append((current_batch_symbols.copy(), timeframes))
+                current_batch_symbols = [symbol]
+            else:
+                # Add symbol to current batch
+                current_batch_symbols.append(symbol)
+        
+        # Add the last batch if it has symbols
+        if current_batch_symbols:
+            batches.append((current_batch_symbols, timeframes))
+        
+        return batches if batches else [([], timeframes)]
     
     def parse_kline_message(self, message: Dict) -> Optional[KlineData]:
         """Parse kline WebSocket message into canonical OHLCV format
@@ -463,7 +530,7 @@ class BinanceWebSocketService:
         return True
     
     async def connect_and_subscribe(self, symbols: List[str], timeframes: List[str]):
-        """Connect to WebSocket and subscribe to kline streams with improved error handling"""
+        """Connect to WebSocket(s) and subscribe to kline streams, splitting into batches if needed"""
         if not symbols or not timeframes:
             logger.error("Cannot connect: empty symbols or timeframes list")
             return False
@@ -475,47 +542,76 @@ class BinanceWebSocketService:
             if mapped not in valid_intervals:
                 logger.warning(f"Timeframe {tf} (mapped to {mapped}) may not be supported by Binance")
         
-        # Use multi-stream URL if we have multiple streams
-        # Note: We always use multi-stream when we have ticker streams (which is always now)
-        if len(symbols) * len(timeframes) > 1 or len(symbols) > 1:
-            url = self.build_multi_stream_url(symbols, timeframes)
-            total_kline_streams = len(symbols) * len(timeframes)
-            total_ticker_streams = len(symbols)
-            total_streams = total_kline_streams + total_ticker_streams
-            logger.info(
-                f"Connecting to multi-stream WebSocket: {len(symbols)} symbols x {len(timeframes)} timeframes = {total_kline_streams} kline streams + {total_ticker_streams} ticker streams = {total_streams} total streams"
-            )
-        else:
-            # Single stream (kline only, but we still want ticker)
-            # For single symbol/timeframe, we'll use multi-stream to include ticker
-            symbol = symbols[0] if symbols else ""
-            timeframe = timeframes[0] if timeframes else ""
-            kline_stream = self.build_stream_name(symbol, timeframe)
-            ticker_stream = self.build_ticker_stream_name(symbol)
-            url = f"{self.ws_stream_url}?streams={kline_stream}/{ticker_stream}"
-            logger.info(f"Connecting to multi-stream WebSocket: {kline_stream} + {ticker_stream}")
+        # Close existing connections
+        await self.close()
+        self.websockets = []
         
-        try:
-            # Connect with timeout
-            self.websocket = await asyncio.wait_for(
-                websockets.connect(
-                    url, 
-                    ping_interval=WS_PING_INTERVAL, 
-                    ping_timeout=WS_PING_TIMEOUT
-                ),
-                timeout=10.0
+        # Split symbols into batches that fit within URL length limit
+        batches = self.build_stream_batches(symbols, timeframes)
+        
+        if len(batches) > 1:
+            logger.info(
+                f"Splitting {len(symbols)} symbols into {len(batches)} WebSocket connections "
+                f"to avoid URL length limit"
             )
+        
+        # Connect to each batch
+        connected_count = 0
+        for batch_idx, (batch_symbols, batch_timeframes) in enumerate(batches):
+            if not batch_symbols:
+                continue
+            
+            # Build URL for this batch
+            url = self.build_multi_stream_url(batch_symbols, batch_timeframes)
+            url_length = len(url)
+            total_kline_streams = len(batch_symbols) * len(batch_timeframes)
+            total_ticker_streams = len(batch_symbols)
+            total_streams = total_kline_streams + total_ticker_streams
+            
+            logger.info(
+                f"Connecting to WebSocket batch {batch_idx + 1}/{len(batches)}: "
+                f"{len(batch_symbols)} symbols x {len(batch_timeframes)} timeframes = "
+                f"{total_kline_streams} kline streams + {total_ticker_streams} ticker streams = "
+                f"{total_streams} total streams (URL length: {url_length})"
+            )
+            
+            try:
+                # Connect with timeout
+                ws = await asyncio.wait_for(
+                    websockets.connect(
+                        url, 
+                        ping_interval=WS_PING_INTERVAL, 
+                        ping_timeout=WS_PING_TIMEOUT
+                    ),
+                    timeout=10.0
+                )
+                self.websockets.append(ws)
+                connected_count += 1
+                logger.info(f"WebSocket batch {batch_idx + 1} connected successfully (URL length: {url_length})")
+            except asyncio.TimeoutError:
+                logger.error(f"WebSocket batch {batch_idx + 1} connection timeout after 10s")
+            except Exception as e:
+                error_msg = str(e)
+                if "414" in error_msg or "URI Too Long" in error_msg:
+                    logger.error(
+                        f"WebSocket batch {batch_idx + 1} rejected: URL too long ({url_length} chars). "
+                        f"This batch still exceeds limit - need smaller batches."
+                    )
+                else:
+                    logger.error(f"Failed to connect WebSocket batch {batch_idx + 1}: {e}")
+        
+        # Update connection status
+        if connected_count > 0:
             self.is_connected = True
             self.reconnect_delay = 1  # Reset delay on successful connection
-            logger.info(f"WebSocket connected successfully: {url[:100]}...")
+            # For backward compatibility, set self.websocket to first connection
+            if self.websockets:
+                self.websocket = self.websockets[0]
+            logger.info(f"Connected {connected_count}/{len(batches)} WebSocket batches successfully")
             return True
-        except asyncio.TimeoutError:
-            logger.error(f"WebSocket connection timeout after 10s: {url[:100]}...")
+        else:
             self.is_connected = False
-            return False
-        except Exception as e:
-            logger.error(f"Failed to connect WebSocket: {e}, URL: {url[:100]}...")
-            self.is_connected = False
+            logger.error(f"Failed to connect any WebSocket batches ({len(batches)} attempted)")
             return False
     
     async def listen_and_process(self, symbols: List[str], timeframes: List[str], shutdown_event=None):
@@ -535,7 +631,7 @@ class BinanceWebSocketService:
         try:
             while shutdown_event is None or not shutdown_event.is_set():
                 try:
-                    if not self.is_connected or not self.websocket:
+                    if not self.is_connected or not self.websockets:
                         # Reconnect with exponential backoff
                         await asyncio.sleep(self.reconnect_delay)
                         self.reconnect_delay = min(self.reconnect_delay * 2, self.max_reconnect_delay)
@@ -571,16 +667,66 @@ class BinanceWebSocketService:
                             await asyncio.sleep(1)
                             continue
                     
-                    # Receive message (with shutdown check)
+                    # Receive message from any connected WebSocket (with shutdown check)
+                    if not self.websockets:
+                        # No active connections, try to reconnect
+                        await asyncio.sleep(self.reconnect_delay)
+                        self.reconnect_delay = min(self.reconnect_delay * 2, self.max_reconnect_delay)
+                        success = await self.connect_and_subscribe(symbols, timeframes)
+                        if not success:
+                            continue
+                        continue
+                    
+                    # Use asyncio.wait to receive from any of the WebSocket connections
                     try:
-                        message_str = await asyncio.wait_for(
-                            self.websocket.recv(), 
-                            timeout=30.0
+                        # Create tasks from coroutines (required by asyncio.wait)
+                        recv_tasks = [asyncio.create_task(ws.recv()) for ws in self.websockets]
+                        
+                        done, pending = await asyncio.wait(
+                            recv_tasks,
+                            timeout=30.0,
+                            return_when=asyncio.FIRST_COMPLETED
                         )
+                        
+                        if shutdown_event and shutdown_event.is_set():
+                            # Cancel all tasks if shutting down
+                            for task in pending:
+                                task.cancel()
+                            break
+                        
+                        if not done:
+                            # Timeout - cancel all tasks and check shutdown
+                            for task in recv_tasks:
+                                task.cancel()
+                                try:
+                                    await task
+                                except (asyncio.CancelledError, Exception):
+                                    pass
+                            if shutdown_event and shutdown_event.is_set():
+                                break
+                            continue
+                        
+                        # Get message from the first completed connection
+                        message_task = done.pop()
+                        message_str = await message_task
+                        
+                        # Cancel pending tasks (we only process one message at a time)
+                        for task in pending:
+                            task.cancel()
+                            try:
+                                await task
+                            except asyncio.CancelledError:
+                                pass
                     except asyncio.TimeoutError:
                         # Check shutdown on timeout
                         if shutdown_event and shutdown_event.is_set():
                             break
+                        continue
+                    except Exception as e:
+                        logger.error(f"Error receiving WebSocket message: {e}", exc_info=True)
+                        # Reconnect on error
+                        await self.close()
+                        await asyncio.sleep(self.reconnect_delay)
                         continue
                     
                     if shutdown_event and shutdown_event.is_set():
@@ -676,13 +822,6 @@ class BinanceWebSocketService:
                             # Clear batch buffer on error
                             self.batch_buffer.clear()
                     
-                except asyncio.TimeoutError:
-                    # Send ping to keep connection alive
-                    if self.websocket:
-                        try:
-                            await self.websocket.ping()
-                        except Exception as ping_error:
-                            logger.debug(f"Ping failed: {ping_error}")
                 except (ConnectionClosed, WebSocketException) as e:
                     logger.warning(
                         f"WebSocket connection closed: {e}. "
@@ -691,12 +830,8 @@ class BinanceWebSocketService:
                     )
                     self.is_connected = False
                     self.reconnect_count += 1
-                    if self.websocket:
-                        try:
-                            await self.websocket.close()
-                        except:
-                            pass
-                    self.websocket = None
+                    # Close all connections
+                    await self.close()
                     # Close database session on connection loss
                     if db:
                         try:

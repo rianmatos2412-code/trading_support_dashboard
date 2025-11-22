@@ -8,8 +8,9 @@ It uses PostgreSQL and stores alerts in the strategy_alerts table.
 import sys
 import os
 from typing import List, Dict, Optional, Tuple
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import text
+import pandas as pd
 
 # Add shared to path
 sys.path.append(os.path.join(os.path.dirname(__file__), '../../'))
@@ -142,13 +143,14 @@ class AlertDatabase:
         """Convert Unix timestamp to datetime."""
         return datetime.fromtimestamp(unix_timestamp)
     
-    def save_alerts(self, alerts: List[Dict], asset_symbol: str) -> Dict[str, int]:
+    def save_alerts(self, alerts: List[Dict], asset_symbol: str, df: Optional[pd.DataFrame] = None) -> Dict[str, int]:
         """
         Save alerts to database, skipping those that already exist.
         
         Args:
             alerts: List of alert dictionaries from _generate_alerts
             asset_symbol: Asset symbol (e.g., "BTCUSDT")
+            df: Optional DataFrame with candle data to extract swing timestamps from indices
             
         Returns:
             Dictionary with counts: {'saved': int, 'skipped': int, 'errors': int}
@@ -186,21 +188,44 @@ class AlertDatabase:
                     low_price = swing_low[1]
                     high_price = swing_high[1]
                     
-                    # Get swing timestamps from alert or use current timestamp
-                    # The alert should contain timestamps, but if not, use current time
-                    swing_low_timestamp = alert.get('swing_low_timestamp')
-                    swing_high_timestamp = alert.get('swing_high_timestamp')
+                    # Extract swing timestamps from DataFrame using swing indices
+                    # Swing tuples are (index, price) where index is the DataFrame row index
+                    swing_low_timestamp = None
+                    swing_high_timestamp = None
                     
-                    # If timestamps are in unix format, convert them
-                    if isinstance(swing_low_timestamp, (int, float)):
-                        swing_low_timestamp = self._unix_to_timestamp(int(swing_low_timestamp))
-                    elif swing_low_timestamp is None:
-                        swing_low_timestamp = datetime.now()
+                    if df is not None and len(df) > 0:
+                        try:
+                            # Get indices from swing tuples
+                            low_idx = swing_low[0]
+                            high_idx = swing_high[0]
+                            
+                            # Get timestamp from DataFrame using the index
+                            # DataFrame is in chronological order (oldest first) after get_candle processing
+                            # Use unix timestamp column to get the candle timestamp
+                            if isinstance(low_idx, (int, float)) and 0 <= int(low_idx) < len(df):
+                                unix_ts = int(df.iloc[int(low_idx)]['unix'])
+                                swing_low_timestamp = self._unix_to_timestamp(unix_ts)
+                            
+                            if isinstance(high_idx, (int, float)) and 0 <= int(high_idx) < len(df):
+                                unix_ts = int(df.iloc[int(high_idx)]['unix'])
+                                swing_high_timestamp = self._unix_to_timestamp(unix_ts)
+                        except (KeyError, IndexError, ValueError, TypeError) as e:
+                            logger.warning(f"Could not extract swing timestamps from DataFrame: {e}")
                     
-                    if isinstance(swing_high_timestamp, (int, float)):
-                        swing_high_timestamp = self._unix_to_timestamp(int(swing_high_timestamp))
-                    elif swing_high_timestamp is None:
-                        swing_high_timestamp = datetime.now()
+                    # Fallback to alert data or current time if DataFrame extraction failed
+                    if swing_low_timestamp is None:
+                        swing_low_timestamp = alert.get('swing_low_timestamp')
+                        if isinstance(swing_low_timestamp, (int, float)):
+                            swing_low_timestamp = self._unix_to_timestamp(int(swing_low_timestamp))
+                        elif swing_low_timestamp is None:
+                            swing_low_timestamp = datetime.now()
+                    
+                    if swing_high_timestamp is None:
+                        swing_high_timestamp = alert.get('swing_high_timestamp')
+                        if isinstance(swing_high_timestamp, (int, float)):
+                            swing_high_timestamp = self._unix_to_timestamp(int(swing_high_timestamp))
+                        elif swing_high_timestamp is None:
+                            swing_high_timestamp = datetime.now()
                     
                     timeframe_id = self._get_timeframe_id(db, timeframe)
                     if not timeframe_id:
@@ -259,6 +284,25 @@ class AlertDatabase:
                             # Ensure timestamp is in ISO format string
                             timestamp_str = alert_timestamp.isoformat() if hasattr(alert_timestamp, 'isoformat') else str(alert_timestamp)
                             
+                            # Convert swing timestamps to ISO format strings
+                            swing_low_ts_str = None
+                            if swing_low_timestamp:
+                                if hasattr(swing_low_timestamp, 'isoformat'):
+                                    swing_low_ts_str = swing_low_timestamp.isoformat()
+                                elif isinstance(swing_low_timestamp, (int, float)):
+                                    swing_low_ts_str = datetime.fromtimestamp(swing_low_timestamp, tz=timezone.utc).isoformat()
+                                else:
+                                    swing_low_ts_str = str(swing_low_timestamp)
+                            
+                            swing_high_ts_str = None
+                            if swing_high_timestamp:
+                                if hasattr(swing_high_timestamp, 'isoformat'):
+                                    swing_high_ts_str = swing_high_timestamp.isoformat()
+                                elif isinstance(swing_high_timestamp, (int, float)):
+                                    swing_high_ts_str = datetime.fromtimestamp(swing_high_timestamp, tz=timezone.utc).isoformat()
+                                else:
+                                    swing_high_ts_str = str(swing_high_timestamp)
+                            
                             alert_event = {
                                 "id": alert_id,
                                 "symbol": asset_symbol,
@@ -271,7 +315,9 @@ class AlertDatabase:
                                 "take_profit_3": float(alert.get('tp3')) if alert.get('tp3') is not None else None,
                                 "risk_score": str(alert.get('risk_score', 'none')),
                                 "swing_low_price": float(low_price),
+                                "swing_low_timestamp": swing_low_ts_str,
                                 "swing_high_price": float(high_price),
+                                "swing_high_timestamp": swing_high_ts_str,
                                 "direction": alert.get('trend_type')
                             }
                             
@@ -442,7 +488,9 @@ class AlertDatabase:
         alerts_4h = result.get('alerts_4h', [])
         if alerts_4h:
             # Check if we have a new 4H candle
-            should_process_4h = True
+            # Default to False for safety - only process if we can verify it's a new candle
+            should_process_4h = False
+            
             if df_4h is not None and len(df_4h) > 0:
                 try:
                     # Get the latest candle timestamp (after get_candle, latest is at iloc[-1])
@@ -453,9 +501,16 @@ class AlertDatabase:
                         self.update_candle_timestamp(asset_symbol, '4h', latest_4h_timestamp)
                 except (KeyError, IndexError, ValueError) as e:
                     logger.warning(f"Could not extract 4H candle timestamp: {e}")
+                    # If we can't verify it's a new candle, skip processing to avoid duplicates
+                    # The alerts will be processed on the next run when we have valid data
+                    should_process_4h = False
+            else:
+                # No DataFrame available - can't verify if it's a new candle
+                # Skip processing to avoid potential duplicates
+                logger.debug(f"No 4H DataFrame available for {asset_symbol}, skipping alert processing")
             
             if should_process_4h:
-                summary['4h'] = self.save_alerts(alerts_4h, asset_symbol)
+                summary['4h'] = self.save_alerts(alerts_4h, asset_symbol, df=df_4h)
             else:
                 summary['4h'] = {'saved': 0, 'skipped': len(alerts_4h), 'errors': 0}
         
@@ -463,7 +518,9 @@ class AlertDatabase:
         alerts_30m = result.get('alerts_30m', [])
         if alerts_30m:
             # Check if we have a new 30M candle
-            should_process_30m = True
+            # Default to False for safety - only process if we can verify it's a new candle
+            should_process_30m = False
+            
             if df_30m is not None and len(df_30m) > 0:
                 try:
                     # Get the latest candle timestamp (after get_candle, latest is at iloc[-1])
@@ -474,9 +531,16 @@ class AlertDatabase:
                         self.update_candle_timestamp(asset_symbol, '30m', latest_30m_timestamp)
                 except (KeyError, IndexError, ValueError) as e:
                     logger.warning(f"Could not extract 30M candle timestamp: {e}")
+                    # If we can't verify it's a new candle, skip processing to avoid duplicates
+                    # The alerts will be processed on the next run when we have valid data
+                    should_process_30m = False
+            else:
+                # No DataFrame available - can't verify if it's a new candle
+                # Skip processing to avoid potential duplicates
+                logger.debug(f"No 30M DataFrame available for {asset_symbol}, skipping alert processing")
             
             if should_process_30m:
-                summary['30m'] = self.save_alerts(alerts_30m, asset_symbol)
+                summary['30m'] = self.save_alerts(alerts_30m, asset_symbol, df=df_30m)
             else:
                 summary['30m'] = {'saved': 0, 'skipped': len(alerts_30m), 'errors': 0}
         
