@@ -19,12 +19,28 @@ export function SwingMarkers({
   candles,
 }: SwingMarkersProps) {
   useEffect(() => {
-    if (!chart || !series || !swings.length || !candles.length) return;
+    if (!chart || !series) {
+      // Clear markers if chart/series are not available
+      try {
+        if (series && series.setMarkers) {
+          series.setMarkers([]);
+        }
+      } catch (error) {
+        // Series might be disposed, ignore
+      }
+      return;
+    }
 
     try {
       // Check if chart/series are still valid (not disposed)
       // Try to access a property that would throw if disposed
       if (!chart.timeScale || !series.setMarkers) return;
+
+      // If no swings or candles, clear markers
+      if (!swings.length || !candles.length) {
+        series.setMarkers([]);
+        return;
+      }
 
       const markers = swings
         .map((swing) => {

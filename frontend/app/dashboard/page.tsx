@@ -10,7 +10,9 @@ import {
   fetchLatestSignal,
   fetchMarketMetadata,
   fetchAlertsForSwings,
+  fetchSignals,
 } from "@/lib/api";
+import { TradingSignal } from "@/lib/api";
 import { SwingPoint } from "@/lib/api";
 import { Timeframe } from "@/lib/types";
 import { ChartContainer } from "@/components/chart/ChartContainer";
@@ -25,7 +27,7 @@ import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { formatPrice, formatTimestamp } from "@/lib/utils";
-import { Settings, TrendingUp, TrendingDown, RefreshCw } from "lucide-react";
+import { Settings, TrendingUp, TrendingDown, RefreshCw, ChevronLeft, ChevronRight } from "lucide-react";
 import Link from "next/link";
 
 const SYMBOL_MANAGER_WIDTH_KEY = "symbol_manager_width";
@@ -59,6 +61,11 @@ export default function DashboardPage() {
 
   // State for refresh button loading
   const [isRefreshingSwings, setIsRefreshingSwings] = useState(false);
+  
+  // State for signal navigation
+  const [allSignals, setAllSignals] = useState<TradingSignal[]>([]);
+  const [currentSignalIndex, setCurrentSignalIndex] = useState<number>(0);
+  const [isLoadingSignals, setIsLoadingSignals] = useState(false);
 
   // Function to refresh swing high/low points from backend
   const refreshSwingPoints = useCallback(async () => {
@@ -285,6 +292,66 @@ export default function DashboardPage() {
     loadData();
   }, [selectedSymbol, selectedTimeframe, setCandles, setLoading, setError]);
 
+  // Fetch all signals for the selected symbol and timeframe
+  useEffect(() => {
+    const loadSignals = async () => {
+      setIsLoadingSignals(true);
+      try {
+        const signals = await fetchSignals({
+          symbol: selectedSymbol,
+          limit: 1000,
+        });
+        
+        // Filter signals by timeframe and sort by timestamp descending (newest first)
+        const filteredSignals = signals
+          .filter((s) => s.timeframe === selectedTimeframe)
+          .sort((a, b) => 
+            new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+          );
+        
+        setAllSignals(filteredSignals);
+        
+        // Set the first signal (latest) as the current signal
+        if (filteredSignals.length > 0) {
+          setCurrentSignalIndex(0);
+          setLatestSignal(filteredSignals[0]);
+        } else {
+          setCurrentSignalIndex(0);
+          setLatestSignal(null);
+        }
+      } catch (error) {
+        console.error("Error loading signals:", error);
+        setAllSignals([]);
+        setCurrentSignalIndex(0);
+        setLatestSignal(null);
+      } finally {
+        setIsLoadingSignals(false);
+      }
+    };
+
+    loadSignals();
+  }, [selectedSymbol, selectedTimeframe, setLatestSignal]);
+
+  // Update displayed signal when index changes
+  useEffect(() => {
+    if (allSignals.length > 0 && currentSignalIndex >= 0 && currentSignalIndex < allSignals.length) {
+      setLatestSignal(allSignals[currentSignalIndex]);
+    }
+  }, [currentSignalIndex, allSignals, setLatestSignal]);
+
+  // Navigation functions
+  const handlePreviousSignal = () => {
+    if (currentSignalIndex < allSignals.length - 1) {
+      setCurrentSignalIndex(currentSignalIndex + 1);
+    }
+  };
+
+  const handleNextSignal = () => {
+    if (currentSignalIndex > 0) {
+      setCurrentSignalIndex(currentSignalIndex - 1);
+    }
+  };
+
   const marketScore = latestSignal?.market_score || 0;
 
   return (
@@ -403,6 +470,34 @@ export default function DashboardPage() {
                         <span className="text-xs text-muted-foreground">
                           {formatTimestamp(latestSignal.timestamp)}
                         </span>
+                        {/* Signal Navigation */}
+                        <div className="flex items-center gap-1 ml-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={handlePreviousSignal}
+                            disabled={currentSignalIndex >= allSignals.length - 1 || isLoadingSignals}
+                            className="h-7 w-7 p-0"
+                            title="Previous signal (older)"
+                          >
+                            <ChevronLeft className="h-4 w-4" />
+                          </Button>
+                          <span className="text-xs text-muted-foreground px-2">
+                            {allSignals.length > 0 
+                              ? `${currentSignalIndex + 1} / ${allSignals.length}`
+                              : "0 / 0"}
+                          </span>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={handleNextSignal}
+                            disabled={currentSignalIndex <= 0 || isLoadingSignals}
+                            className="h-7 w-7 p-0"
+                            title="Next signal (newer)"
+                          >
+                            <ChevronRight className="h-4 w-4" />
+                          </Button>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -418,10 +513,12 @@ export default function DashboardPage() {
                 <MarketScore score={marketScore} />
               </Card>
 
-              {/* Latest Signal Info */}
+              {/* Signal Info */}
               {latestSignal ? (
                 <Card className="p-4">
-                  <h3 className="text-sm font-semibold mb-4">Latest Signal</h3>
+                  <h3 className="text-sm font-semibold mb-4">
+                    Signal {allSignals.length > 0 ? `${currentSignalIndex + 1} / ${allSignals.length}` : ""}
+                  </h3>
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
                       <span className="text-xs text-muted-foreground">Direction</span>

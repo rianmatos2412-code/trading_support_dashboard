@@ -539,20 +539,22 @@ export function ChartContainer({
     <div className="relative w-full h-full">
       <div ref={chartContainerRef} className="w-full" style={{ height: `${height}px` }} />
       
-      {/* Always show Swing High/Low markers from strategy alerts */}
-      <SwingMarkers
-        chart={chartRef.current}
-        series={seriesRef.current}
-        swings={currentSwings}
-        candles={candles.filter(
-          (c) => c.symbol === selectedSymbol && c.timeframe === selectedTimeframe
-        )}
-      />
+      {/* Show Swing High/Low markers based on chart settings */}
+      {chartSettings.showSwings && (
+        <SwingMarkers
+          chart={chartRef.current}
+          series={seriesRef.current}
+          swings={currentSwings}
+          candles={candles.filter(
+            (c) => c.symbol === selectedSymbol && c.timeframe === selectedTimeframe
+          )}
+        />
+      )}
       
       {/* Hide Fibs, OB, S/R - removed from display */}
       
-      {/* Always show Entry/SL/TP lines */}
-      {latestSignal && (
+      {/* Show Entry/SL/TP lines based on chart settings */}
+      {chartSettings.showEntrySLTP && latestSignal && (
         <EntrySlTpLines
           chart={chartRef.current}
           series={seriesRef.current}
