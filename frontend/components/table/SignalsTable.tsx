@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { TradingSignal } from "@/lib/api";
 import { ConfluenceBadges } from "@/components/ui/ConfluenceBadge";
 import { Badge } from "@/components/ui/badge";
@@ -10,6 +10,10 @@ import { TrendingUp, TrendingDown, ArrowUpDown, ArrowUp, ArrowDown } from "lucid
 import { motion } from "framer-motion";
 import { useRouter } from "next/navigation";
 import { useMarketStore } from "@/stores/useMarketStore";
+import { subscribeToSymbolUpdates } from "@/hooks/useSymbolData";
+import { SymbolItem } from "@/components/ui/SymbolManager";
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 type SortField = 
   | "timestamp" 
@@ -18,7 +22,9 @@ type SortField =
   | "direction" 
   | "entry"
   | "sl"
-  | "tp1";
+  | "tp1"
+  | "price"
+  | "price_score";
 type SortDirection = "asc" | "desc";
 
 interface SignalsTableProps {
@@ -31,6 +37,46 @@ export function SignalsTable({ signals, onRowClick }: SignalsTableProps) {
   const { setSelectedSymbol, setLatestSignal } = useMarketStore();
   const [sortField, setSortField] = useState<SortField>("timestamp");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
+  
+  // State to store current prices for each symbol (from WebSocket updates)
+  const [symbolPrices, setSymbolPrices] = useState<Record<string, number>>({});
+
+  // Subscribe to WebSocket symbol price updates
+  useEffect(() => {
+    const unsubscribe = subscribeToSymbolUpdates((update: Partial<SymbolItem>) => {
+      if (update.symbol && update.price !== undefined) {
+        setSymbolPrices((prev) => ({
+          ...prev,
+          [update.symbol!]: update.price!,
+        }));
+      }
+    });
+
+    return unsubscribe;
+  }, []);
+
+  // Fetch initial prices from API on mount
+  useEffect(() => {
+    const fetchInitialPrices = async () => {
+      try {
+        const response = await fetch(`${API_URL}/symbols`);
+        if (response.ok) {
+          const symbols: SymbolItem[] = await response.json();
+          const prices: Record<string, number> = {};
+          symbols.forEach((symbol) => {
+            if (symbol.price !== undefined && symbol.price !== null) {
+              prices[symbol.symbol] = symbol.price;
+            }
+          });
+          setSymbolPrices((prev) => ({ ...prev, ...prices }));
+        }
+      } catch (error) {
+        console.error("Error fetching initial prices:", error);
+      }
+    };
+
+    fetchInitialPrices();
+  }, []);
 
   const sortedSignals = useMemo(() => {
     const sorted = [...signals].sort((a, b) => {
@@ -66,6 +112,19 @@ export function SignalsTable({ signals, onRowClick }: SignalsTableProps) {
           aValue = a.tp1 || 0;
           bValue = b.tp1 || 0;
           break;
+        case "price":
+          aValue = symbolPrices[a.symbol] || 0;
+          bValue = symbolPrices[b.symbol] || 0;
+          break;
+        case "price_score":
+          // Calculate score: abs(current_price - entry_price) / entry_price
+          const aEntryPrice = a.entry1 || a.price || 0;
+          const aCurrentPrice = symbolPrices[a.symbol] || 0;
+          const bEntryPrice = b.entry1 || b.price || 0;
+          const bCurrentPrice = symbolPrices[b.symbol] || 0;
+          aValue = aEntryPrice > 0 ? Math.abs(aCurrentPrice - aEntryPrice) / aEntryPrice : 0;
+          bValue = bEntryPrice > 0 ? Math.abs(bCurrentPrice - bEntryPrice) / bEntryPrice : 0;
+          break;
         default:
           return 0;
       }
@@ -82,7 +141,7 @@ export function SignalsTable({ signals, onRowClick }: SignalsTableProps) {
     });
 
     return sorted;
-  }, [signals, sortField, sortDirection]);
+  }, [signals, sortField, sortDirection, symbolPrices]);
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -137,15 +196,26 @@ export function SignalsTable({ signals, onRowClick }: SignalsTableProps) {
                   <SortIcon field="symbol" />
                 </Button>
               </th>
-              <th className="px-4 py-3 text-left">
+              <th className="px-4 py-3 text-right">
                 <Button
                   variant="ghost"
                   size="sm"
                   className="h-auto p-0 font-semibold"
-                  onClick={() => handleSort("market_score")}
+                  onClick={() => handleSort("price")}
                 >
-                  Score
-                  <SortIcon field="market_score" />
+                  Price
+                  <SortIcon field="price" />
+                </Button>
+              </th>
+              <th className="px-4 py-3 text-right">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-auto p-0 font-semibold"
+                  onClick={() => handleSort("price_score")}
+                >
+                  Price Score
+                  <SortIcon field="price_score" />
                 </Button>
               </th>
               <th className="px-4 py-3 text-left">
@@ -203,6 +273,8 @@ export function SignalsTable({ signals, onRowClick }: SignalsTableProps) {
           <tbody>
             {sortedSignals.map((signal, index) => {
               const isHighScore = (signal.market_score || 0) >= 90;
+              const currentPrice = symbolPrices[signal.symbol]; // Get current price for this symbol
+              
               return (
                 <motion.tr
                   key={signal.id || index}
@@ -219,18 +291,41 @@ export function SignalsTable({ signals, onRowClick }: SignalsTableProps) {
                   <td className="px-4 py-3 font-medium">
                     {signal.symbol.replace("USDT", "/USDT")}
                   </td>
-                  <td className="px-4 py-3">
-                    <span
-                      className={`
-                        font-semibold
-                        ${isHighScore ? "text-emerald-400" : ""}
-                        ${(signal.market_score || 0) >= 75 && (signal.market_score || 0) < 90 ? "text-green-400" : ""}
-                        ${(signal.market_score || 0) >= 60 && (signal.market_score || 0) < 75 ? "text-yellow-400" : ""}
-                        ${(signal.market_score || 0) < 60 ? "text-gray-400" : ""}
-                      `}
-                    >
-                      {signal.market_score || 0}
-                    </span>
+                  <td className="px-4 py-3 text-right font-medium">
+                    {currentPrice !== undefined && currentPrice !== null 
+                      ? formatPrice(currentPrice) 
+                      : <span className="text-muted-foreground">-</span>
+                    }
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    {(() => {
+                      const entryPrice = signal.entry1 || signal.price || 0;
+                      let priceScore: number | null = null;
+                      
+                      if (currentPrice !== undefined && currentPrice !== null && entryPrice > 0) {
+                        // Calculate: abs(current_price - entry_price) / entry_price
+                        priceScore = Math.abs(currentPrice - entryPrice) / entryPrice;
+                      }
+                      
+                      if (priceScore !== null) {
+                        // Display as percentage with 2 decimal places
+                        const percentage = (priceScore * 100).toFixed(2);
+                        // Color coding: green if close to entry (< 1%), yellow if moderate (1-3%), red if far (> 3%)
+                        const colorClass = priceScore < 0.01 
+                          ? "text-green-400" 
+                          : priceScore < 0.03 
+                          ? "text-yellow-400" 
+                          : "text-red-400";
+                        
+                        return (
+                          <span className={`font-medium ${colorClass}`}>
+                            {percentage}%
+                          </span>
+                        );
+                      }
+                      
+                      return <span className="text-muted-foreground">-</span>;
+                    })()}
                   </td>
                   <td className="px-4 py-3">
                     <Badge
