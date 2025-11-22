@@ -24,7 +24,7 @@ try:
         
         # Binance API
         binance_api_url: str = Field(
-            default="",
+            default="https://fapi.binance.com",
             alias="BINANCE_API_URL"
         )
         binance_api_key: str = Field(default="", alias="BINANCE_API_KEY")

@@ -726,6 +726,45 @@ class CoinGeckoIngestionService:
                 binance_service=binance_service,
                 create_symbols=True
             )
+            
+            # Extract symbols from enriched assets
+            enriched_symbols = set()
+            for asset in enriched_assets:
+                symbol = asset.get("_binance_symbol")
+                if symbol:
+                    enriched_symbols.add(symbol)
+            
+            # Get all active symbols from database
+            active_symbols_result = db.execute(
+                text("SELECT symbol_name FROM symbols WHERE is_active = TRUE")
+            ).fetchall()
+            db_active_symbols = {row[0] for row in active_symbols_result}
+            
+            # Find symbols in database that are not in enriched assets
+            symbols_to_deactivate = db_active_symbols - enriched_symbols
+            
+            if symbols_to_deactivate:
+                # Deactivate symbols not in enriched assets
+                current_timestamp = datetime.now(timezone.utc)
+                db.execute(
+                    text("""
+                        UPDATE symbols
+                        SET is_active = FALSE,
+                            removed_at = :removed_at,
+                            updated_at = :updated_at
+                        WHERE symbol_name = ANY(:symbol_names)
+                        AND is_active = TRUE
+                    """),
+                    {
+                        "removed_at": current_timestamp,
+                        "updated_at": current_timestamp,
+                        "symbol_names": list(symbols_to_deactivate)
+                    }
+                )
+                db.commit()
+                logger.info(f"Deactivated {len(symbols_to_deactivate)} symbols not in enriched assets")
+            else:
+                logger.info("All active symbols are present in enriched assets, no deactivation needed")
         
         logger.info(f"Successfully saved {len(enriched_assets)} assets to database")
 
