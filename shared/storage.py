@@ -505,5 +505,151 @@ class StorageService:
             self.db.rollback()
             return False
 
+    def get_ingestion_config(self, config_key: Optional[str] = None) -> Dict:
+        """Get ingestion configuration values from database"""
+        try:
+            if config_key:
+                # Get single config value
+                result = self.db.execute(
+                    text("""
+                        SELECT config_key, config_value, config_type, description, updated_at, updated_by
+                        FROM ingestion_config
+                        WHERE config_key = :config_key
+                    """),
+                    {"config_key": config_key}
+                ).fetchone()
+                
+                if not result:
+                    return {}
+                
+                # Parse value based on type
+                value = result[1]  # config_value
+                if result[2] == 'number':  # config_type
+                    try:
+                        if '.' in str(value):
+                            value = float(value)
+                        else:
+                            value = int(value)
+                    except ValueError:
+                        pass
+                elif result[2] == 'json':
+                    import json
+                    value = json.loads(value)
+                
+                return {config_key: value}
+            else:
+                # Get all config values
+                results = self.db.execute(
+                    text("""
+                        SELECT config_key, config_value, config_type, description, updated_at, updated_by
+                        FROM ingestion_config
+                        ORDER BY config_key
+                    """)
+                ).fetchall()
+                
+                result = {}
+                for row in results:
+                    config_key, config_value, config_type, description, updated_at, updated_by = row
+                    value = config_value
+                    if config_type == 'number':
+                        try:
+                            if '.' in str(value):
+                                value = float(value)
+                            else:
+                                value = int(value)
+                        except ValueError:
+                            pass
+                    elif config_type == 'json':
+                        import json
+                        value = json.loads(value)
+                    result[config_key] = value
+                return result
+        except Exception as e:
+            logger.error(f"Error getting ingestion config: {e}")
+            return {}
+
+    def update_ingestion_config(self, config_key: str, config_value: str, updated_by: Optional[str] = None) -> bool:
+        """Update an ingestion configuration value"""
+        try:
+            # Check if config exists
+            existing = self.db.execute(
+                text("""
+                    SELECT config_type FROM ingestion_config WHERE config_key = :config_key
+                """),
+                {"config_key": config_key}
+            ).fetchone()
+            
+            config_type = 'number'  # Default type
+            if existing:
+                config_type = existing[0]
+            
+            # Update or insert
+            self.db.execute(
+                text("""
+                    INSERT INTO ingestion_config (config_key, config_value, config_type, updated_at, updated_by)
+                    VALUES (:config_key, :config_value, :config_type, NOW(), :updated_by)
+                    ON CONFLICT (config_key) DO UPDATE SET
+                        config_value = EXCLUDED.config_value,
+                        updated_at = NOW(),
+                        updated_by = EXCLUDED.updated_by
+                """),
+                {
+                    "config_key": config_key,
+                    "config_value": str(config_value),
+                    "config_type": config_type,
+                    "updated_by": updated_by or "api-service"
+                }
+            )
+            
+            self.db.commit()
+            logger.info(f"Updated ingestion config: {config_key} = {config_value}")
+            return True
+        except Exception as e:
+            logger.error(f"Error updating ingestion config: {e}")
+            self.db.rollback()
+            return False
+
+    def update_ingestion_configs(self, configs: Dict[str, str], updated_by: Optional[str] = None) -> bool:
+        """Update multiple ingestion configuration values"""
+        try:
+            for config_key, config_value in configs.items():
+                # Check if config exists to get its type
+                existing = self.db.execute(
+                    text("""
+                        SELECT config_type FROM ingestion_config WHERE config_key = :config_key
+                    """),
+                    {"config_key": config_key}
+                ).fetchone()
+                
+                config_type = 'number'  # Default type
+                if existing:
+                    config_type = existing[0]
+                
+                # Update or insert
+                self.db.execute(
+                    text("""
+                        INSERT INTO ingestion_config (config_key, config_value, config_type, updated_at, updated_by)
+                        VALUES (:config_key, :config_value, :config_type, NOW(), :updated_by)
+                        ON CONFLICT (config_key) DO UPDATE SET
+                            config_value = EXCLUDED.config_value,
+                            updated_at = NOW(),
+                            updated_by = EXCLUDED.updated_by
+                    """),
+                    {
+                        "config_key": config_key,
+                        "config_value": str(config_value),
+                        "config_type": config_type,
+                        "updated_by": updated_by or "api-service"
+                    }
+                )
+            
+            self.db.commit()
+            logger.info(f"Updated {len(configs)} ingestion configs")
+            return True
+        except Exception as e:
+            logger.error(f"Error updating ingestion configs: {e}")
+            self.db.rollback()
+            return False
+
 
 

@@ -5,6 +5,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { ArrowLeft, Save } from "lucide-react";
 import Link from "next/link";
 import { motion } from "framer-motion";
@@ -12,6 +13,9 @@ import {
   fetchStrategyConfig,
   updateStrategyConfigs,
   StrategyConfig,
+  fetchIngestionConfig,
+  updateIngestionConfigs,
+  IngestionConfig,
 } from "@/lib/api";
 
 export default function SettingsPage() {
@@ -37,8 +41,19 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        {/* Strategy Configuration */}
-        <StrategyConfigTab />
+        {/* Configuration Tabs */}
+        <Tabs defaultValue="strategy" className="w-full">
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="strategy">Strategy Config</TabsTrigger>
+            <TabsTrigger value="ingestion">Ingestion Config</TabsTrigger>
+          </TabsList>
+          <TabsContent value="strategy">
+            <StrategyConfigTab />
+          </TabsContent>
+          <TabsContent value="ingestion">
+            <IngestionConfigTab />
+          </TabsContent>
+        </Tabs>
       </div>
     </div>
   );
@@ -356,6 +371,161 @@ function StrategyConfigTab() {
                 />
                 <p className="text-xs text-muted-foreground">
                   JSON format: {"{"}"BTCUSDT": 0.015, "ETHUSDT": 0.015{"}"}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </Card>
+    </>
+  );
+}
+
+// Ingestion Configuration Component
+function IngestionConfigTab() {
+  const [config, setConfig] = useState<IngestionConfig>({});
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    loadConfig();
+  }, []);
+
+  const loadConfig = async () => {
+    setIsLoading(true);
+    try {
+      const data = await fetchIngestionConfig();
+      setConfig(data);
+    } catch (error) {
+      console.error("Error loading ingestion config:", error);
+      setSaveMessage("Error loading configuration");
+      setTimeout(() => setSaveMessage(null), 3000);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleUpdate = (key: string, value: string) => {
+    setConfig((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const handleSave = async () => {
+    setIsSaving(true);
+    setSaveMessage(null);
+    try {
+      // Convert all values to strings for API
+      const configsToSave: Record<string, string> = {};
+      for (const [key, value] of Object.entries(config)) {
+        configsToSave[key] = String(value);
+      }
+      await updateIngestionConfigs(configsToSave);
+      setSaveMessage("Ingestion configuration saved successfully!");
+      setTimeout(() => setSaveMessage(null), 3000);
+    } catch (error) {
+      console.error("Error saving ingestion config:", error);
+      setSaveMessage("Error saving configuration");
+      setTimeout(() => setSaveMessage(null), 3000);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <Card className="p-6">
+        <p className="text-muted-foreground">Loading ingestion configuration...</p>
+      </Card>
+    );
+  }
+
+  return (
+    <>
+      {saveMessage && (
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="p-4 bg-primary/10 border border-primary/20 rounded-lg text-sm text-primary"
+        >
+          {saveMessage}
+        </motion.div>
+      )}
+
+      <Card className="p-6">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="text-lg font-semibold">Ingestion Configuration</h3>
+            <p className="text-sm text-muted-foreground mt-1">
+              Configure data ingestion parameters for Binance and CoinGecko
+            </p>
+          </div>
+          <Button onClick={handleSave} disabled={isSaving}>
+            <Save className="h-4 w-4 mr-2" />
+            {isSaving ? "Saving..." : "Save"}
+          </Button>
+        </div>
+
+        <div className="space-y-6">
+          {/* Binance Filters */}
+          <div className="space-y-4">
+            <h4 className="text-sm font-medium">Binance Filters</h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="limit_volume_up">
+                  Minimum 24h Volume (USD)
+                </Label>
+                <Input
+                  id="limit_volume_up"
+                  type="number"
+                  value={config.limit_volume_up || ""}
+                  onChange={(e) =>
+                    handleUpdate("limit_volume_up", e.target.value)
+                  }
+                  placeholder="50000000"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Minimum 24h volume filter for Binance perpetuals in USD
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* CoinGecko Filters */}
+          <div className="space-y-4 pt-4 border-t">
+            <h4 className="text-sm font-medium">CoinGecko Filters</h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="limit_market_cap">
+                  Minimum Market Cap (USD)
+                </Label>
+                <Input
+                  id="limit_market_cap"
+                  type="number"
+                  value={config.limit_market_cap || ""}
+                  onChange={(e) =>
+                    handleUpdate("limit_market_cap", e.target.value)
+                  }
+                  placeholder="50000000"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Minimum market cap filter from CoinGecko in USD
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="coingecko_limit">
+                  CoinGecko Limit
+                </Label>
+                <Input
+                  id="coingecko_limit"
+                  type="number"
+                  value={config.coingecko_limit || ""}
+                  onChange={(e) =>
+                    handleUpdate("coingecko_limit", e.target.value)
+                  }
+                  placeholder="250"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Number of top coins to fetch from CoinGecko by market cap
                 </p>
               </div>
             </div>

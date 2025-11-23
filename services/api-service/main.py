@@ -635,6 +635,88 @@ async def update_strategy_configs(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# Ingestion Configuration endpoints
+class IngestionConfigResponse(BaseModel):
+    config_key: str
+    config_value: str
+    config_type: str
+    description: Optional[str]
+    updated_at: Optional[datetime]
+    updated_by: Optional[str]
+    
+    class Config:
+        from_attributes = True
+
+
+class IngestionConfigUpdate(BaseModel):
+    config_value: str
+
+
+class IngestionConfigBulkUpdate(BaseModel):
+    configs: Dict[str, str]
+
+
+@app.get("/ingestion-config", response_model=Dict[str, Any])
+async def get_ingestion_config(
+    config_key: Optional[str] = Query(None, description="Get specific config key"),
+    db: Session = Depends(get_db)
+):
+    """Get ingestion configuration values"""
+    try:
+        with StorageService() as storage:
+            configs = storage.get_ingestion_config(config_key)
+            return configs
+    except Exception as e:
+        logger.error(f"Error getting ingestion config: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/ingestion-config/{config_key}")
+async def update_ingestion_config(
+    config_key: str,
+    config_update: IngestionConfigUpdate,
+    db: Session = Depends(get_db)
+):
+    """Update an ingestion configuration value"""
+    try:
+        with StorageService() as storage:
+            success = storage.update_ingestion_config(
+                config_key=config_key,
+                config_value=config_update.config_value,
+                updated_by="api-service"  # Could be enhanced to track user
+            )
+            if not success:
+                raise HTTPException(status_code=500, detail="Failed to update config")
+            return {"success": True, "config_key": config_key, "config_value": config_update.config_value}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating ingestion config: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/ingestion-config")
+async def update_ingestion_configs(
+    bulk_update: IngestionConfigBulkUpdate,
+    db: Session = Depends(get_db)
+):
+    """Update multiple ingestion configuration values at once"""
+    try:
+        with StorageService() as storage:
+            success = storage.update_ingestion_configs(
+                configs=bulk_update.configs,
+                updated_by="api-service"  # Could be enhanced to track user
+            )
+            if not success:
+                raise HTTPException(status_code=500, detail="Failed to update configs")
+            return {"success": True, "updated_count": len(bulk_update.configs)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating ingestion configs: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """WebSocket endpoint for real-time updates"""
