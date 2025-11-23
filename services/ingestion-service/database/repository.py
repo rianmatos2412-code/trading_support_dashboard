@@ -215,3 +215,110 @@ def get_strategy_config_value(db: Session, config_key: str, default_value: Optio
         )
         return default_value
 
+
+def get_ingestion_config_value(db: Session, config_key: str, default_value: Optional[float] = None) -> Optional[float]:
+    """Get ingestion config value from database, returning as float for numeric types
+    
+    Args:
+        db: Database session
+        config_key: Configuration key to look up (e.g., 'limit_volume_up', 'limit_market_cap', 'coingecko_limit')
+        default_value: Default value to return if not found or error occurs
+    
+    Returns:
+        Config value as float, or default_value if not found/error
+    """
+    try:
+        result = db.execute(
+            text("""
+                SELECT config_value, config_type
+                FROM ingestion_config
+                WHERE config_key = :config_key
+            """),
+            {"config_key": config_key}
+        ).fetchone()
+        
+        if result:
+            config_value, config_type = result
+            if config_type == 'number':
+                try:
+                    return float(config_value)
+                except (ValueError, TypeError):
+                    logger.warning(
+                        "ingestion_config_value_parse_error",
+                        config_key=config_key,
+                        config_value=config_value,
+                        config_type=config_type
+                    )
+                    return default_value
+            else:
+                logger.warning(
+                    "ingestion_config_type_mismatch",
+                    config_key=config_key,
+                    expected_type="number",
+                    actual_type=config_type
+                )
+                return default_value
+        
+        logger.debug(f"Ingestion config key '{config_key}' not found in database, using default: {default_value}")
+        return default_value
+    except Exception as e:
+        logger.error(
+            "ingestion_config_error",
+            config_key=config_key,
+            error=str(e),
+            exc_info=True
+        )
+        return default_value
+
+
+def set_ingestion_config_value(
+    db: Session, 
+    config_key: str, 
+    config_value: float, 
+    updated_by: Optional[str] = None
+) -> bool:
+    """Set ingestion config value in database
+    
+    Args:
+        db: Database session
+        config_key: Configuration key to set (e.g., 'limit_volume_up', 'limit_market_cap', 'coingecko_limit')
+        config_value: Configuration value to set (will be converted to string)
+        updated_by: Optional identifier of who/what updated the value
+    
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        db.execute(
+            text("""
+                INSERT INTO ingestion_config (config_key, config_value, config_type, updated_at, updated_by)
+                VALUES (:config_key, :config_value, 'number', NOW(), :updated_by)
+                ON CONFLICT (config_key) DO UPDATE SET
+                    config_value = EXCLUDED.config_value,
+                    updated_at = NOW(),
+                    updated_by = EXCLUDED.updated_by
+            """),
+            {
+                "config_key": config_key,
+                "config_value": str(config_value),
+                "updated_by": updated_by or "ingestion-service"
+            }
+        )
+        db.commit()
+        logger.info(
+            "ingestion_config_updated",
+            config_key=config_key,
+            config_value=config_value
+        )
+        return True
+    except Exception as e:
+        logger.error(
+            "ingestion_config_update_error",
+            config_key=config_key,
+            config_value=config_value,
+            error=str(e),
+            exc_info=True
+        )
+        db.rollback()
+        return False
+

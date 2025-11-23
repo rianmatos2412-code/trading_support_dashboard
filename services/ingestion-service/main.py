@@ -63,10 +63,9 @@ async def periodic_market_data_update():
     """Background task to update market data every 5 minutes with metrics"""
     logger.info("periodic_market_data_update_started")
     while True:
-        try:            
-            await asyncio.sleep(300)  # Wait 5 minutes
-            
+        try:                        
             start_time = datetime.now()
+            await asyncio.sleep(300)  # Wait 5 minutes
             
             # Get all symbols from database that have market data
             with DatabaseManager() as db:
@@ -75,6 +74,7 @@ async def periodic_market_data_update():
                         SELECT DISTINCT s.symbol_name
                         FROM symbols s
                         INNER JOIN market_data md ON s.symbol_id = md.symbol_id
+                        WHERE s.is_active = TRUE AND s.removed_at is NULL
                         ORDER BY s.symbol_name
                     """)
                 ).fetchall()
@@ -180,98 +180,98 @@ async def main():
             logger.info("binance_perpetuals_ingestion_completed")
     
     # Start periodic market data update task (runs every 5 minutes, independently)
-    # update_task = asyncio.create_task(periodic_market_data_update())
-    # logger.info("periodic_market_data_update_task_started")
+    update_task = asyncio.create_task(periodic_market_data_update())
+    logger.info("periodic_market_data_update_task_started")
     
-    # try:
-    #     # Get qualified symbols and timeframes from database
-    #     with DatabaseManager() as db:
-    #         timeframes = get_ingestion_timeframes(db)
-    #         symbols = get_qualified_symbols(db)
-    #         if not symbols:
-    #             logger.warning("no_qualified_symbols_using_defaults")
-    #             symbols = DEFAULT_SYMBOLS
+    try:
+        # Get qualified symbols and timeframes from database
+        with DatabaseManager() as db:
+            timeframes = get_ingestion_timeframes(db)
+            symbols = get_qualified_symbols(db)
+            if not symbols:
+                logger.warning("no_qualified_symbols_using_defaults")
+                symbols = DEFAULT_SYMBOLS
         
-    #     logger.info(
-    #         "websocket_ingestion_starting",
-    #         symbol_count=len(symbols),
-    #         timeframe_count=len(timeframes),
-    #         timeframes=timeframes
-    #     )
+        logger.info(
+            "websocket_ingestion_starting",
+            symbol_count=len(symbols),
+            timeframe_count=len(timeframes),
+            timeframes=timeframes
+        )
         
-    #     # Start gap detection task
-    #     gap_task = asyncio.create_task(gap_detection_task(symbols, timeframes))
+        # Start gap detection task
+        gap_task = asyncio.create_task(gap_detection_task(symbols, timeframes))
         
-    #     # Start WebSocket service for real-time OHLCV data
-    #     # This replaces the REST polling loop
-    #     async with BinanceWebSocketService() as ws_service:
-    #         # Start periodic metrics logging task
-    #         async def log_metrics_periodically():
-    #             while not shutdown_event.is_set():
-    #                 try:
-    #                     await asyncio.sleep(300)  # Log every 5 minutes
+        # Start WebSocket service for real-time OHLCV data
+        # This replaces the REST polling loop
+        async with BinanceWebSocketService() as ws_service:
+            # Start periodic metrics logging task
+            async def log_metrics_periodically():
+                while not shutdown_event.is_set():
+                    try:
+                        await asyncio.sleep(300)  # Log every 5 minutes
                         
-    #                     if shutdown_event.is_set():
-    #                         break
+                        if shutdown_event.is_set():
+                            break
                         
-    #                     metrics = ws_service.get_metrics()
-    #                     messages_per_sec = (
-    #                         metrics['messages_received'] / 300 
-    #                         if metrics['messages_received'] > 0 else 0
-    #                     )
-    #                     logger.info(
-    #                         "websocket_metrics",
-    #                         messages_received=metrics['messages_received'],
-    #                         messages_per_second=messages_per_sec,
-    #                         parse_errors=metrics['parse_errors'],
-    #                         reconnect_count=metrics['reconnect_count'],
-    #                         is_connected=metrics['is_connected']
-    #                     )
-    #                 except asyncio.CancelledError:
-    #                     break
+                        metrics = ws_service.get_metrics()
+                        messages_per_sec = (
+                            metrics['messages_received'] / 300 
+                            if metrics['messages_received'] > 0 else 0
+                        )
+                        logger.info(
+                            "websocket_metrics",
+                            messages_received=metrics['messages_received'],
+                            messages_per_second=messages_per_sec,
+                            parse_errors=metrics['parse_errors'],
+                            reconnect_count=metrics['reconnect_count'],
+                            is_connected=metrics['is_connected']
+                        )
+                    except asyncio.CancelledError:
+                        break
             
-    #         metrics_task = asyncio.create_task(log_metrics_periodically())
+            metrics_task = asyncio.create_task(log_metrics_periodically())
             
-    #         try:
-    #             # Start WebSocket service (runs indefinitely with reconnection)
-    #             # Pass shutdown_event to allow graceful shutdown
-    #             await ws_service.start(symbols, timeframes, shutdown_event=shutdown_event)
-    #         finally:
-    #             # Graceful shutdown: cancel tasks and flush pending data
-    #             logger.info("shutdown_initiated")
+            try:
+                # Start WebSocket service (runs indefinitely with reconnection)
+                # Pass shutdown_event to allow graceful shutdown
+                await ws_service.start(symbols, timeframes, shutdown_event=shutdown_event)
+            finally:
+                # Graceful shutdown: cancel tasks and flush pending data
+                logger.info("shutdown_initiated")
                 
-    #             # Cancel metrics task
-    #             metrics_task.cancel()
-    #             try:
-    #                 await metrics_task
-    #             except asyncio.CancelledError:
-    #                 pass
+                # Cancel metrics task
+                metrics_task.cancel()
+                try:
+                    await metrics_task
+                except asyncio.CancelledError:
+                    pass
                 
-    #             # Cancel gap detection task
-    #             gap_task.cancel()
-    #             try:
-    #                 await gap_task
-    #             except asyncio.CancelledError:
-    #                 pass
+                # Cancel gap detection task
+                gap_task.cancel()
+                try:
+                    await gap_task
+                except asyncio.CancelledError:
+                    pass
                 
-    #             # Flush any pending batches in WebSocket service
-    #             if ws_service.batch_buffer:
-    #                 logger.info("flushing_pending_batches", count=len(ws_service.batch_buffer))
-    #                 try:
-    #                     with DatabaseManager() as db:
-    #                         await ws_service.flush_batch(db)
-    #                 except Exception as e:
-    #                     logger.error("error_flushing_final_batch", error=str(e))
+                # Flush any pending batches in WebSocket service
+                if ws_service.batch_buffer:
+                    logger.info("flushing_pending_batches", count=len(ws_service.batch_buffer))
+                    try:
+                        with DatabaseManager() as db:
+                            await ws_service.flush_batch(db)
+                    except Exception as e:
+                        logger.error("error_flushing_final_batch", error=str(e))
                 
-    #             logger.info("shutdown_completed")
+                logger.info("shutdown_completed")
 
-    # finally:
-    #     # Cancel the hourly update task
-    #     update_task.cancel()
-    #     try:
-    #         await update_task
-    #     except asyncio.CancelledError:
-    #         pass
+    finally:
+        # Cancel the hourly update task
+        update_task.cancel()
+        try:
+            await update_task
+        except asyncio.CancelledError:
+            pass
 
 
 if __name__ == "__main__":

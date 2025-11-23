@@ -23,7 +23,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from utils.circuit_breaker import AsyncCircuitBreaker
 from utils.rate_limiter import COINGECKO_RATE_LIMIT, COINGECKO_MINUTE_LIMIT
 from config.settings import COINGECKO_API_URL, COINGECKO_MIN_MARKET_CAP, COINGECKO_MIN_VOLUME_24H
-from database.repository import get_or_create_symbol_record, get_strategy_config_value
+from database.repository import get_or_create_symbol_record, get_ingestion_config_value
 from services.binance_service import BinanceIngestionService
 
 logger = structlog.get_logger(__name__)
@@ -566,31 +566,31 @@ class CoinGeckoIngestionService:
         # Get filter thresholds and limits from database if not provided
         with DatabaseManager() as db:
             if min_binance_volume is None:
-                db_value = get_strategy_config_value(
+                db_value = get_ingestion_config_value(
                     db, 
                     "limit_volume_up", 
                     default_value=COINGECKO_MIN_VOLUME_24H
                 )
                 min_binance_volume = db_value if db_value is not None else COINGECKO_MIN_VOLUME_24H
-                logger.info(f"Loaded min_binance_volume from database: {min_binance_volume}")
+                logger.info(f"Loaded min_binance_volume from ingestion_config: {min_binance_volume}")
             
             if min_market_cap is None:
-                db_value = get_strategy_config_value(
+                db_value = get_ingestion_config_value(
                     db,
                     "limit_market_cap",
                     default_value=COINGECKO_MIN_MARKET_CAP
                 )
                 min_market_cap = db_value if db_value is not None else COINGECKO_MIN_MARKET_CAP
-                logger.info(f"Loaded min_market_cap from database: {min_market_cap}")
+                logger.info(f"Loaded min_market_cap from ingestion_config: {min_market_cap}")
             
             # Get CoinGecko limit from database
-            db_value = get_strategy_config_value(
+            db_value = get_ingestion_config_value(
                 db,
                 "coingecko_limit",
                 default_value=250.0
             )
             coingecko_limit = int(db_value) if db_value is not None else 250
-            logger.info(f"Loaded coingecko_limit from database: {coingecko_limit}")
+            logger.info(f"Loaded coingecko_limit from ingestion_config: {coingecko_limit}")
         
         # Step 1: Fetch Binance USDT perpetual futures
         perpetual_symbols = await binance_service.get_available_perpetual_symbols()
