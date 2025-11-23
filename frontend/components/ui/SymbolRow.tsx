@@ -13,6 +13,15 @@ interface SymbolRowProps {
   onToggleFavorite: (symbol: string) => void;
 }
 
+const formatNumber = (num: number | undefined): string => {
+  if (!num || num === 0) return "N/A";
+  if (num >= 1e12) return `${(num / 1e12).toFixed(2)}T`;
+  if (num >= 1e9) return `${(num / 1e9).toFixed(2)}B`;
+  if (num >= 1e6) return `${(num / 1e6).toFixed(2)}M`;
+  if (num >= 1e3) return `${(num / 1e3).toFixed(2)}K`;
+  return num.toFixed(2);
+};
+
 export function SymbolRow({
   item,
   isSelected,
@@ -69,8 +78,8 @@ export function SymbolRow({
         </div>
       </div>
 
-      {/* Mid: Price */}
-      <div className="flex flex-col items-end mx-3 min-w-[80px]">
+      {/* Mid: Price, Market Cap, and Volume */}
+      <div className="flex flex-col items-end mx-3 min-w-[120px]">
         <div className="text-sm font-medium text-foreground">
           ${item.price.toLocaleString(undefined, {
             minimumFractionDigits: 2,
@@ -81,6 +90,16 @@ export function SymbolRow({
           {changeSign}
           {item.change24h.toFixed(2)}%
         </div>
+        {item.marketcap !== undefined && (
+          <div className="text-xs text-muted-foreground mt-1">
+            MCap: ${formatNumber(item.marketcap)}
+          </div>
+        )}
+        {item.volume_24h !== undefined && (
+          <div className="text-xs text-muted-foreground">
+            Vol: ${formatNumber(item.volume_24h)}
+          </div>
+        )}
       </div>
 
       {/* Right: Star Icon */}

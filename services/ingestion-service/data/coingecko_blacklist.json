@@ -1,0 +1,14 @@
+{
+  "blacklist": [
+    "wrapped-solana",
+    "wrapped-sol",
+    "wrapped-steth",
+    "wsteth",
+    "wrapped-bitcoin",
+    "wrapped-ether",
+    "wrapped-ecomi",
+    "wrapped-btc",
+    "wrapped-eth"
+  ]
+}
+

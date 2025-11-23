@@ -30,6 +30,8 @@ logger = structlog.get_logger(__name__)
 
 # Path to local mapping file
 MAPPING_FILE_PATH = os.path.join(os.path.dirname(__file__), '..', 'data', 'ticker_to_coingecko_mapping.json')
+# Path to local blacklist file
+BLACKLIST_FILE_PATH = os.path.join(os.path.dirname(__file__), '..', 'data', 'coingecko_blacklist.json')
 
 class CoinGeckoIngestionService:
     """Service for ingesting market data from CoinGecko API"""
@@ -43,6 +45,7 @@ class CoinGeckoIngestionService:
             expected_exception=(aiohttp.ClientError, asyncio.TimeoutError, Exception)
         )
         self._mapping_cache: Optional[Dict[str, str]] = None
+        self._blacklist_cache: Optional[Set[str]] = None
     
     async def __aenter__(self):
         self.session = aiohttp.ClientSession()
@@ -414,6 +417,63 @@ class CoinGeckoIngestionService:
         except Exception as e:
             logger.error(f"Error saving ticker mapping: {e}")
     
+    def load_blacklist(self) -> Set[str]:
+        """Load blacklist from local file
+        
+        Returns:
+            Set of blacklisted coin IDs (all lowercase)
+        """
+        if self._blacklist_cache is not None:
+            return self._blacklist_cache
+        
+        try:
+            if os.path.exists(BLACKLIST_FILE_PATH):
+                with open(BLACKLIST_FILE_PATH, 'r') as f:
+                    data = json.load(f)
+                    # Support both old format (list) and new format (dict with "blacklist" key)
+                    if isinstance(data, list):
+                        blacklist = set(item.lower() for item in data)
+                    elif isinstance(data, dict) and "blacklist" in data:
+                        blacklist = set(item.lower() for item in data["blacklist"])
+                    else:
+                        blacklist = set()
+                    self._blacklist_cache = blacklist
+                    return blacklist
+            else:
+                # Create empty blacklist file if it doesn't exist
+                os.makedirs(os.path.dirname(BLACKLIST_FILE_PATH), exist_ok=True)
+                with open(BLACKLIST_FILE_PATH, 'w') as f:
+                    json.dump({"blacklist": []}, f, indent=2)
+                self._blacklist_cache = set()
+                return set()
+        except Exception as e:
+            logger.error(f"Error loading blacklist: {e}")
+            self._blacklist_cache = set()
+            return set()
+    
+    def is_blacklisted(self, coin_id: Optional[str] = None, coin_data: Optional[Dict] = None) -> bool:
+        """Check if a coin is blacklisted
+        
+        Args:
+            coin_id: CoinGecko coin ID (e.g., "wrapped-solana")
+            coin_data: CoinGecko coin data dict (will extract id)
+        
+        Returns:
+            True if the coin is blacklisted
+        """
+        blacklist = self.load_blacklist()
+        if not blacklist:
+            return False
+        
+        # Get coin ID from coin_data if provided
+        if coin_data and not coin_id:
+            coin_id = coin_data.get("id")
+        
+        if coin_id:
+            return coin_id.lower() in blacklist
+        
+        return False
+    
     async def _search_coin_by_ticker_impl(self, ticker: str) -> Optional[Dict]:
         """Search for coin by ticker using CoinGecko search endpoint"""
         url = f"{self.base_url}/search"
@@ -640,6 +700,13 @@ class CoinGeckoIngestionService:
         
         for coin_data in top_coins:
             try:
+                # Check if coin is blacklisted
+                if self.is_blacklisted(coin_data=coin_data):
+                    coin_id = coin_data.get("id", "unknown")
+                    logger.debug(f"Skipping blacklisted coin: {coin_id}")
+                    skipped_no_binance_match += 1
+                    continue
+                
                 # Get ticker symbol from CoinGecko data
                 coin_symbol = coin_data.get("symbol", "").upper()
                 if not coin_symbol:
