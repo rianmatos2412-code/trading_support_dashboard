@@ -3,10 +3,11 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { LayoutDashboard, Table2, Settings, TrendingUp } from "lucide-react";
+import { LayoutDashboard, Table2, Settings, TrendingUp, Coins } from "lucide-react";
 
 const navigation = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+  { name: "Symbols", href: "/symbols", icon: Coins },
   { name: "Signals", href: "/signals", icon: Table2 },
   { name: "Settings", href: "/settings", icon: Settings },
 ];
