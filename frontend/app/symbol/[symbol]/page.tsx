@@ -15,6 +15,9 @@ import Link from "next/link";
 import { motion } from "framer-motion";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { subscribeToSymbolUpdates } from "@/hooks/useSymbolData";
+import { TimeframeSelector } from "@/components/ui/TimeframeSelector";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 
 export default function SymbolDetailPage() {
   const params = useParams();
@@ -22,7 +25,15 @@ export default function SymbolDetailPage() {
   // Get symbol from URL and ensure it ends with USDT
   let symbolParam = (params.symbol as string).toUpperCase().replace("/", "");
   const symbol = symbolParam.endsWith("USDT") ? symbolParam : symbolParam + "USDT";
-  const { setSelectedSymbol, setLatestSignal } = useMarketStore();
+  const { 
+    setSelectedSymbol, 
+    setLatestSignal, 
+    setCandles: setStoreCandles, 
+    setSelectedTimeframe,
+    selectedTimeframe,
+    chartSettings,
+    updateChartSettings
+  } = useMarketStore();
 
   const [signals, setSignals] = useState<TradingSignal[]>([]);
   const [candles, setCandles] = useState<Candle[]>([]);
@@ -36,22 +47,40 @@ export default function SymbolDetailPage() {
   });
 
   // WebSocket connection for real-time updates
-  useWebSocket(symbol, "1h");
+  useWebSocket(symbol, selectedTimeframe);
 
   useEffect(() => {
     const loadData = async () => {
       setIsLoading(true);
       try {
+        // Set symbol first to ensure ChartContainer is ready
         setSelectedSymbol(symbol);
+        // Use current timeframe from store, default to "1h" if not set
+        const timeframe = selectedTimeframe || "1h";
+        if (!selectedTimeframe) {
+          setSelectedTimeframe("1h");
+        }
+        
         const [fetchedSignals, fetchedCandles, fetchedDetails] = await Promise.all([
           fetchSignals({ symbol, limit: 100 }),
-          fetchCandles(symbol, "1h", 200),
+          fetchCandles(symbol, timeframe, 200),
           fetchSymbolDetails(symbol).catch(() => null), // Don't fail if details not available
         ]);
 
         setSignals(fetchedSignals);
         setCandles(fetchedCandles);
         setSymbolDetails(fetchedDetails);
+        
+        // Set symbol and timeframe in store first, then update candles
+        // This ensures ChartContainer can properly filter candles
+        setSelectedSymbol(symbol);
+        setSelectedTimeframe("1h");
+        
+        // Also update store candles so ChartContainer can display them
+        // Only set if we have candles
+        if (fetchedCandles && fetchedCandles.length > 0) {
+          setStoreCandles(fetchedCandles);
+        }
         if (fetchedSignals.length > 0) {
           setLatestSignal(fetchedSignals[0]);
         }
@@ -84,7 +113,24 @@ export default function SymbolDetailPage() {
     };
 
     loadData();
-  }, [symbol, setSelectedSymbol, setLatestSignal]);
+  }, [symbol, setSelectedSymbol, setLatestSignal, setStoreCandles, setSelectedTimeframe]);
+
+  // Reload candles when timeframe changes (but not on initial load)
+  useEffect(() => {
+    if (!selectedTimeframe || isLoading) return;
+    
+    const reloadCandles = async () => {
+      try {
+        const fetchedCandles = await fetchCandles(symbol, selectedTimeframe, 200);
+        setCandles(fetchedCandles);
+        setStoreCandles(fetchedCandles);
+      } catch (error) {
+        console.error("Error reloading candles:", error);
+      }
+    };
+
+    reloadCandles();
+  }, [selectedTimeframe, symbol, setStoreCandles, isLoading]);
 
   // Subscribe to real-time symbol updates
   useEffect(() => {
@@ -234,10 +280,109 @@ export default function SymbolDetailPage() {
           </Card>
         </div>
 
+        {/* Chart Controls */}
+        <Card className="p-4">
+          <div className="flex flex-wrap items-center gap-4 mb-4">
+            <div className="flex items-center gap-2">
+              <Label htmlFor="timeframe">Timeframe:</Label>
+              <TimeframeSelector />
+            </div>
+            <div className="flex-1" />
+            
+            {/* Chart Toggle Controls */}
+            <div className="flex items-center gap-4 flex-wrap">
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="show-swings"
+                  checked={chartSettings.showSwings}
+                  onCheckedChange={(checked: boolean) =>
+                    updateChartSettings({ showSwings: checked })
+                  }
+                />
+                <Label htmlFor="show-swings" className="text-sm cursor-pointer">
+                  Swings
+                </Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="show-entry"
+                  checked={chartSettings.showEntrySLTP}
+                  onCheckedChange={(checked: boolean) =>
+                    updateChartSettings({ showEntrySLTP: checked })
+                  }
+                />
+                <Label htmlFor="show-entry" className="text-sm cursor-pointer">
+                  Entry/SL/TP
+                </Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="show-rsi"
+                  checked={chartSettings.showRSI}
+                  onCheckedChange={(checked: boolean) =>
+                    updateChartSettings({ showRSI: checked })
+                  }
+                />
+                <Label htmlFor="show-rsi" className="text-sm cursor-pointer">
+                  RSI
+                </Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="show-tooltip"
+                  checked={chartSettings.showTooltip}
+                  onCheckedChange={(checked: boolean) =>
+                    updateChartSettings({ showTooltip: checked })
+                  }
+                />
+                <Label htmlFor="show-tooltip" className="text-sm cursor-pointer">
+                  Tooltip
+                </Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="show-ma7"
+                  checked={chartSettings.showMA7}
+                  onCheckedChange={(checked: boolean) =>
+                    updateChartSettings({ showMA7: checked })
+                  }
+                />
+                <Label htmlFor="show-ma7" className="text-sm cursor-pointer">
+                  MA(7)
+                </Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="show-ma25"
+                  checked={chartSettings.showMA25}
+                  onCheckedChange={(checked: boolean) =>
+                    updateChartSettings({ showMA25: checked })
+                  }
+                />
+                <Label htmlFor="show-ma25" className="text-sm cursor-pointer">
+                  MA(25)
+                </Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="show-ma99"
+                  checked={chartSettings.showMA99}
+                  onCheckedChange={(checked: boolean) =>
+                    updateChartSettings({ showMA99: checked })
+                  }
+                />
+                <Label htmlFor="show-ma99" className="text-sm cursor-pointer">
+                  MA(99)
+                </Label>
+              </div>
+            </div>
+          </div>
+        </Card>
+
         {/* Chart */}
         <Card className="p-4">
           <div className="mb-4">
-            <h2 className="text-lg font-semibold">Price Chart - 1h</h2>
+            <h2 className="text-lg font-semibold">Price Chart - {selectedTimeframe}</h2>
           </div>
           <ChartContainer height={500} />
         </Card>

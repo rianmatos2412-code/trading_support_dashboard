@@ -268,7 +268,8 @@ export function ChartContainer({
 
   // Update candles data with optimized incremental updates
   useEffect(() => {
-    if (!seriesRef.current || !candles.length) return;
+    // Wait for chart to be ready
+    if (!seriesRef.current) return;
     
     // Check if series is still valid (not disposed)
     try {
@@ -281,6 +282,9 @@ export function ChartContainer({
     const filteredCandles = candles.filter(
       (c) => c.symbol === selectedSymbol && c.timeframe === selectedTimeframe
     );
+    
+    // If no candles match, return early
+    if (!filteredCandles.length) return;
 
     const prevFiltered = prevCandlesRef.current.filter(
       (c) => c.symbol === selectedSymbol && c.timeframe === selectedTimeframe
