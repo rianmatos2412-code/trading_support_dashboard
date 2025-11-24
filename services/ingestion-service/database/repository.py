@@ -32,25 +32,40 @@ def get_or_create_symbol_record(db: Session, symbol: str, image_path: Optional[s
     """
     try:
         result = db.execute(
-            text("SELECT symbol_id, is_active FROM symbols WHERE symbol_name = :symbol"),
+            text("SELECT symbol_id, is_active, image_path FROM symbols WHERE symbol_name = :symbol"),
             {"symbol": symbol}
         ).fetchone()
         
         if result:
-            symbol_id, is_active = result
-            # Reactivate if inactive, update image_path if provided
+            symbol_id, is_active, current_image_path = result
+            # Reactivate if inactive, update image_path if provided and current is NULL
+            needs_update = False
+            update_fields = []
+            update_params = {"symbol_id": symbol_id}
+            
             if not is_active:
+                needs_update = True
+                update_fields.append("is_active = TRUE")
+                update_fields.append("removed_at = NULL")
+                logger.debug("symbol_reactivated_during_creation", symbol=symbol)
+            
+            # Update image_path if provided and current is NULL
+            if image_path and current_image_path is None:
+                needs_update = True
+                update_fields.append("image_path = :image_path")
+                update_params["image_path"] = image_path
+            
+            if needs_update:
+                update_fields.append("updated_at = NOW()")
                 db.execute(
-                    text("""
+                    text(f"""
                         UPDATE symbols
-                        SET is_active = TRUE,
-                            removed_at = NULL,
-                            updated_at = NOW()
+                        SET {', '.join(update_fields)}
                         WHERE symbol_id = :symbol_id
                     """),
-                    {"symbol_id": symbol_id}
+                    update_params
                 )
-                logger.debug("symbol_reactivated_during_creation", symbol=symbol)
+            
             return symbol_id
         
         # Create new symbol (automatically active)

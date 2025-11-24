@@ -851,90 +851,12 @@ class CoinGeckoIngestionService:
         # Create a mapping from coingecko_id to market data
         id_to_market_data = {coin.get("id"): coin for coin in coingecko_market_data if coin.get("id")}
         
-        # Save image_path to symbols table and market data to market_data table
-        current_timestamp = datetime.now(timezone.utc)
-        saved_market_data_count = 0
-        updated_image_path_count = 0
-        
-        with DatabaseManager() as db:
-            # Prepare SQL statements
-            update_image_sql = text("""
-                UPDATE symbols 
-                SET image_path = :image_path, updated_at = NOW()
-                WHERE symbol_name = :symbol_name
-                AND image_path IS NULL
-            """)
-            
-            insert_market_data_sql = text("""
-                INSERT INTO market_data 
-                (symbol_id, timestamp, market_cap, volume_24h, circulating_supply, price)
-                VALUES (:symbol_id, :timestamp, :market_cap, :volume_24h, :circulating_supply, :price)
-                ON CONFLICT (symbol_id, timestamp) 
-                DO UPDATE SET
-                    market_cap = EXCLUDED.market_cap,
-                    volume_24h = EXCLUDED.volume_24h,
-                    circulating_supply = EXCLUDED.circulating_supply,
-                    price = EXCLUDED.price
-            """)
-            
-            for binance_symbol in combined_symbols_data.keys():
-                try:
-                    coingecko_id = symbol_to_coingecko_id.get(binance_symbol)
-                    if not coingecko_id:
-                        continue
-                    
-                    coin_data = id_to_market_data.get(coingecko_id)
-                    if not coin_data:
-                        continue
-                    
-                    # Get symbol_id
-                    symbol_id = self.get_symbol_id(db, binance_symbol)
-                    if not symbol_id:
-                        continue
-                    
-                    # Update image_path in symbols table
-                    image_path = coin_data.get("image")
-                    if image_path:
-                        try:
-                            db.execute(update_image_sql, {
-                                "symbol_name": binance_symbol,
-                                "image_path": image_path
-                            })
-                            updated_image_path_count += 1
-                        except Exception as e:
-                            logger.debug(f"Error updating image_path for {binance_symbol}: {e}")
-                    
-                    # Extract market data
-                    market_cap = coin_data.get("market_cap")
-                    price = coin_data.get("current_price")
-                    circulating_supply = coin_data.get("circulating_supply")
-                    volume_24h = coin_data.get("total_volume")
-                    
-                    # Insert/update market_data
-                    try:
-                        db.execute(insert_market_data_sql, {
-                            "symbol_id": symbol_id,
-                            "timestamp": current_timestamp,
-                            "market_cap": float(market_cap) if market_cap else None,
-                            "volume_24h": float(volume_24h) if volume_24h else None,
-                            "circulating_supply": float(circulating_supply) if circulating_supply else None,
-                            "price": float(price) if price else None
-                        })
-                        saved_market_data_count += 1
-                    except Exception as e:
-                        logger.error(f"Error saving market data for {binance_symbol}: {e}")
-                        continue
-                        
-                except Exception as e:
-                    logger.error(f"Error processing symbol {binance_symbol} for database save: {e}")
-                    continue
-            
-            db.commit()
-            logger.info(
-                f"Saved market data for {saved_market_data_count} symbols, "
-                f"updated image_path for {updated_image_path_count} symbols"
-            )
-        
+        logger.info(
+            "coingecko_market_data_fetched",
+            count=len(id_to_market_data),
+            requested=len(coingecko_ids),
+        )
+
         # Build enriched assets with filters applied
         enriched_assets = []
         skipped_no_coingecko_id = 0
@@ -985,8 +907,13 @@ class CoinGeckoIngestionService:
         binance_service: BinanceIngestionService,
         min_binance_volume: Optional[float] = None,
         min_market_cap: Optional[float] = None
-    ):
-        """Ingest from Binance perpetuals, enrich with CoinGecko, and save to database"""
+    ) -> Dict[str, List[str]]:
+        """Ingest from Binance perpetuals, enrich with CoinGecko, and save to database.
+        
+        Returns:
+            Dict containing metadata about the ingestion run, including any newly
+            activated symbols that now qualify for backfilling.
+        """
         logger.info("Starting new ingestion flow with database save")
         
         # Get enriched assets
@@ -998,35 +925,45 @@ class CoinGeckoIngestionService:
         
         if not enriched_assets:
             logger.warning("No enriched assets to save")
-            return
+            return {"newly_activated_symbols": []}
         
         # Save to database
         with DatabaseManager() as db:
+            def fetch_active_symbol_set() -> Set[str]:
+                result = db.execute(
+                    text("SELECT symbol_name FROM symbols WHERE is_active = TRUE")
+                ).fetchall()
+                cleaned = set()
+                for row in result:
+                    symbol_name = row[0]
+                    if symbol_name:
+                        cleaned.add(symbol_name.lstrip("@").upper())
+                return cleaned
+            
+            active_symbols_before = fetch_active_symbol_set()
+            
             await self.save_market_metrics(
-                db, 
-                enriched_assets, 
+                db,
+                enriched_assets,
                 binance_service=binance_service,
-                create_symbols=True
+                create_symbols=True,
             )
             
-            # Extract symbols from enriched assets
-            enriched_symbols = set()
-            for asset in enriched_assets:
-                symbol = asset.get("_binance_symbol")
-                if symbol:
-                    enriched_symbols.add(symbol)
+            active_symbols_after = fetch_active_symbol_set()
             
-            # Get all active symbols from database
-            active_symbols_result = db.execute(
-                text("SELECT symbol_name FROM symbols WHERE is_active = TRUE")
-            ).fetchall()
-            db_active_symbols = {row[0] for row in active_symbols_result}
+            # Extract symbols from enriched assets for deactivation check
+            enriched_symbols = {
+                (asset.get("_binance_symbol") or "").lstrip("@").upper()
+                for asset in enriched_assets
+                if asset.get("_binance_symbol")
+            }
             
             # Find symbols in database that are not in enriched assets
-            symbols_to_deactivate = db_active_symbols - enriched_symbols
+            symbols_to_deactivate = {
+                symbol for symbol in active_symbols_after if symbol not in enriched_symbols
+            }
             
             if symbols_to_deactivate:
-                # Deactivate symbols not in enriched assets
                 current_timestamp = datetime.now(timezone.utc)
                 db.execute(
                     text("""
@@ -1040,13 +977,23 @@ class CoinGeckoIngestionService:
                     {
                         "removed_at": current_timestamp,
                         "updated_at": current_timestamp,
-                        "symbol_names": list(symbols_to_deactivate)
-                    }
+                        "symbol_names": list(symbols_to_deactivate),
+                    },
                 )
                 db.commit()
-                logger.info(f"Deactivated {len(symbols_to_deactivate)} symbols not in enriched assets")
+                logger.info(
+                    "inactive_symbols_marked",
+                    deactivated_count=len(symbols_to_deactivate),
+                )
             else:
                 logger.info("All active symbols are present in enriched assets, no deactivation needed")
         
-        logger.info(f"Successfully saved {len(enriched_assets)} assets to database")
+        newly_activated_symbols = list(active_symbols_after - active_symbols_before)
+        logger.info(
+            "binance_ingestion_save_completed",
+            saved_assets=len(enriched_assets),
+            newly_activated=len(newly_activated_symbols),
+            deactivated=len(symbols_to_deactivate),
+        )
+        return {"newly_activated_symbols": newly_activated_symbols}
 

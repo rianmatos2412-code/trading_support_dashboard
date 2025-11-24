@@ -334,10 +334,21 @@ async def main():
     # New ingestion flow: Start with Binance perpetual futures, enrich with CoinGecko
     async with BinanceIngestionService() as binance_service:
         async with CoinGeckoIngestionService() as coingecko_service:
-            await coingecko_service.ingest_from_binance_perpetuals_and_save(
+            ingestion_result = await coingecko_service.ingest_from_binance_perpetuals_and_save(
                 binance_service=binance_service
             )
-            logger.info("binance_perpetuals_ingestion_completed")
+            newly_activated = ingestion_result.get("newly_activated_symbols", []) if ingestion_result else []
+            logger.info(
+                "binance_perpetuals_ingestion_completed",
+                newly_activated=len(newly_activated),
+            )
+            if newly_activated:
+                logger.info(
+                    "backfilling_symbols_from_binance_ingestion",
+                    count=len(newly_activated),
+                    symbols=newly_activated[:10] if len(newly_activated) > 10 else newly_activated,
+                )
+                asyncio.create_task(backfill_reactivated_symbols(newly_activated))
     
     # Start periodic market data update task (runs every 5 minutes, independently)
     update_task = asyncio.create_task(periodic_market_data_update())

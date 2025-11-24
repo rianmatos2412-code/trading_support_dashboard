@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ConfluenceBadges } from "@/components/ui/ConfluenceBadge";
 import { formatPrice, formatTimestamp, formatNumber, formatSupply, formatPercent } from "@/lib/utils";
-import { ArrowLeft, TrendingUp, TrendingDown, Target, XCircle, CheckCircle, ArrowUp, ArrowDown } from "lucide-react";
+import { ArrowLeft, TrendingUp, TrendingDown, ArrowUp, ArrowDown } from "lucide-react";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { useWebSocket } from "@/hooks/useWebSocket";
@@ -31,10 +31,6 @@ export default function SymbolDetailPage() {
   const [priceChange24h, setPriceChange24h] = useState<number | null>(null);
   const [stats, setStats] = useState({
     total: 0,
-    wins: 0,
-    losses: 0,
-    winRate: 0,
-    avgScore: 0,
     long: 0,
     short: 0,
   });
@@ -72,24 +68,11 @@ export default function SymbolDetailPage() {
 
         // Calculate statistics
         const total = fetchedSignals.length;
-        const wins = fetchedSignals.filter((s) => {
-          // Simplified: assume TP1 hit if signal exists (would need actual trade results)
-          return s.tp1 && s.market_score && s.market_score >= 75;
-        }).length;
-        const losses = fetchedSignals.filter((s) => {
-          return s.sl && s.market_score && s.market_score < 60;
-        }).length;
         const long = fetchedSignals.filter((s) => s.direction === "long").length;
         const short = fetchedSignals.filter((s) => s.direction === "short").length;
-        const avgScore =
-          fetchedSignals.reduce((sum, s) => sum + (s.market_score || 0), 0) / total || 0;
 
         setStats({
           total,
-          wins,
-          losses,
-          winRate: total > 0 ? (wins / total) * 100 : 0,
-          avgScore,
           long,
           short,
         });
@@ -237,34 +220,10 @@ export default function SymbolDetailPage() {
         )}
 
         {/* Stats Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
           <Card className="p-4">
             <div className="text-sm text-muted-foreground mb-1">Total Signals</div>
             <div className="text-2xl font-bold">{stats.total}</div>
-          </Card>
-          <Card className="p-4">
-            <div className="text-sm text-muted-foreground mb-1">Win Rate</div>
-            <div className="text-2xl font-bold text-green-400">
-              {stats.winRate.toFixed(1)}%
-            </div>
-          </Card>
-          <Card className="p-4">
-            <div className="text-sm text-muted-foreground mb-1">Wins</div>
-            <div className="text-2xl font-bold text-green-400 flex items-center gap-2">
-              <CheckCircle className="h-5 w-5" />
-              {stats.wins}
-            </div>
-          </Card>
-          <Card className="p-4">
-            <div className="text-sm text-muted-foreground mb-1">Losses</div>
-            <div className="text-2xl font-bold text-red-400 flex items-center gap-2">
-              <XCircle className="h-5 w-5" />
-              {stats.losses}
-            </div>
-          </Card>
-          <Card className="p-4">
-            <div className="text-sm text-muted-foreground mb-1">Avg Score</div>
-            <div className="text-2xl font-bold">{stats.avgScore.toFixed(1)}</div>
           </Card>
           <Card className="p-4">
             <div className="text-sm text-muted-foreground mb-1">Long / Short</div>
