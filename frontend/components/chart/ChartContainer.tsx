@@ -19,6 +19,7 @@ import { SupportResistanceLines } from "./SupportResistanceLines";
 import { EntrySlTpLines } from "./EntrySlTpLines";
 import { RSIIndicator } from "./RSIIndicator";
 import { CandleTooltip } from "./CandleTooltip";
+import { MovingAverages } from "./MovingAverages";
 
 interface ChartContainerProps {
   width?: number;
@@ -586,6 +587,17 @@ export function ChartContainer({
           selectedTimeframe={selectedTimeframe}
         />
       )}
+
+      {/* Moving Averages */}
+      <MovingAverages
+        chart={chartRef.current}
+        candles={candles}
+        selectedSymbol={selectedSymbol}
+        selectedTimeframe={selectedTimeframe}
+        showMA7={chartSettings.showMA7}
+        showMA25={chartSettings.showMA25}
+        showMA99={chartSettings.showMA99}
+      />
     </div>
   );
 }

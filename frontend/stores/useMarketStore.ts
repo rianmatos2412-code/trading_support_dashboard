@@ -51,6 +51,9 @@ const defaultChartSettings: ChartSettings = {
   showRSI: true,  // Show RSI by default
   rsiHeight: 20,  // RSI takes 20% of chart height by default
   showTooltip: true,  // Show tooltip by default
+  showMA7: true,  // Show MA(7) by default
+  showMA25: true,  // Show MA(25) by default
+  showMA99: true,  // Show MA(99) by default
 };
 
 export const useMarketStore = create<MarketState>((set) => ({
