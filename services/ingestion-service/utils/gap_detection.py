@@ -15,7 +15,7 @@ from shared.database import DatabaseManager
 
 # Import from local modules
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from database.repository import get_timeframe_id, get_or_create_symbol_record
+from database.repository import get_timeframe_id, get_or_create_symbol_record, get_ingestion_config_value
 
 logger = structlog.get_logger(__name__)
 
@@ -319,7 +319,7 @@ async def backfill_all_symbols_timeframes(
     binance_service,
     symbols: List[str],
     timeframes: List[str],
-    limit: int = 400,
+    limit: Optional[int] = None,
     max_retries: int = 3,
     max_concurrent: int = 5
 ) -> int:
@@ -329,13 +329,24 @@ async def backfill_all_symbols_timeframes(
         binance_service: BinanceIngestionService instance
         symbols: List of trading symbols
         timeframes: List of timeframe strings
-        limit: Number of recent candles to fetch per symbol/timeframe
+        limit: Number of recent candles to fetch per symbol/timeframe. If None, will be fetched from ingestion_config table.
         max_retries: Maximum retry attempts per API call
         max_concurrent: Maximum concurrent requests (default: 5)
     
     Returns:
         Total number of candles inserted across all symbols/timeframes
     """
+    # Get limit from database if not provided
+    if limit is None:
+        with DatabaseManager() as db:
+            limit_value = get_ingestion_config_value(db, "backfill_limit", default_value=400.0)
+            limit = int(limit_value) if limit_value is not None else 400
+            logger.info(
+                "backfill_limit_from_config",
+                limit=limit,
+                config_key="backfill_limit"
+            )
+    
     total_inserted = 0
     
     logger.info(

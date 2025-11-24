@@ -533,6 +533,32 @@ function IngestionConfigTab() {
               </div>
             </div>
           </div>
+
+          {/* Backfill Configuration */}
+          <div className="space-y-4 pt-4 border-t">
+            <h4 className="text-sm font-medium">Backfill Configuration</h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="backfill_limit">
+                  Backfill Limit
+                </Label>
+                <Input
+                  id="backfill_limit"
+                  type="number"
+                  value={config.backfill_limit || ""}
+                  onChange={(e) =>
+                    handleUpdate("backfill_limit", e.target.value)
+                  }
+                  placeholder="400"
+                  min="1"
+                  max="10000"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Number of recent candles to fetch per symbol/timeframe during backfill operations
+                </p>
+              </div>
+            </div>
+          </div>
         </div>
       </Card>
     </>

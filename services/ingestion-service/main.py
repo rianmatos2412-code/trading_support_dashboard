@@ -146,12 +146,12 @@ async def gap_detection_task(initial_symbols: list, timeframes: list):
                 symbols_to_use = current_symbols if current_symbols else initial_symbols
             
             async with BinanceIngestionService() as binance_service:
-                # Simple approach: fetch recent 400 candles and insert missing ones
+                # Limit will be fetched from ingestion_config table
                 total_inserted = await backfill_all_symbols_timeframes(
                     binance_service=binance_service,
                     symbols=symbols_to_use,
                     timeframes=timeframes,
-                    limit=400,
+                    limit=None,  # Will be fetched from ingestion_config table
                     max_retries=3
                 )
                 
@@ -195,7 +195,7 @@ async def backfill_reactivated_symbols(symbols: List[str]):
                 binance_service=binance_service,
                 symbols=symbols,
                 timeframes=timeframes,
-                limit=400,  # Backfill recent 400 candles
+                limit=None,  # Will be fetched from ingestion_config table
                 max_retries=3
             )
             
