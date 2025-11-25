@@ -3,7 +3,10 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { ClientLayout } from "@/components/ui/ClientLayout";
 
-const inter = Inter({ subsets: ["latin"] });
+const inter = Inter({ 
+  subsets: ["latin"],
+  display: "swap", // Prevents render-blocking and reduces preload warnings
+});
 
 export const metadata: Metadata = {
   title: "Trading Support Dashboard",

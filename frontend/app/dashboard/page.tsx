@@ -134,28 +134,34 @@ export default function DashboardPage() {
   }, [selectedSymbol, selectedTimeframe, setSwingPoints, setLatestSignal, setError]);
 
   // Resizable sidebar width state
-  const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
-    if (typeof window !== "undefined") {
-      const stored = localStorage.getItem(SYMBOL_MANAGER_WIDTH_KEY);
-      if (stored) {
-        const width = parseInt(stored, 10);
-        return Math.max(MIN_SIDEBAR_WIDTH, Math.min(MAX_SIDEBAR_WIDTH, width));
-      }
-    }
-    return DEFAULT_SIDEBAR_WIDTH;
-  });
+  // Always start with default to avoid hydration mismatch
+  const [sidebarWidth, setSidebarWidth] = useState<number>(DEFAULT_SIDEBAR_WIDTH);
+  const [isHydrated, setIsHydrated] = useState(false);
 
   const [isResizing, setIsResizing] = useState(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
   const resizeStartX = useRef<number>(0);
   const resizeStartWidth = useRef<number>(0);
 
-  // Persist width to localStorage
+  // Load width from localStorage after hydration (client-side only)
   useEffect(() => {
+    setIsHydrated(true);
     if (typeof window !== "undefined") {
+      const stored = localStorage.getItem(SYMBOL_MANAGER_WIDTH_KEY);
+      if (stored) {
+        const width = parseInt(stored, 10);
+        const clampedWidth = Math.max(MIN_SIDEBAR_WIDTH, Math.min(MAX_SIDEBAR_WIDTH, width));
+        setSidebarWidth(clampedWidth);
+      }
+    }
+  }, []);
+
+  // Persist width to localStorage (only after hydration)
+  useEffect(() => {
+    if (isHydrated && typeof window !== "undefined") {
       localStorage.setItem(SYMBOL_MANAGER_WIDTH_KEY, sidebarWidth.toString());
     }
-  }, [sidebarWidth]);
+  }, [sidebarWidth, isHydrated]);
 
   // Handle resize start
   const handleResizeStart = useCallback((e: React.MouseEvent) => {

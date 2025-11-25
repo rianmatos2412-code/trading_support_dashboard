@@ -21,6 +21,8 @@ export function useWebSocket(symbol?: string, timeframe?: string) {
   const reconnectAttempts = useRef(0);
   const maxReconnectAttempts = 10;
   const reconnectDelay = useRef(1000); // Start with 1 second
+  const isConnectingRef = useRef(false);
+  const isMountedRef = useRef(true);
 
   const {
     addSignal,
@@ -32,12 +34,32 @@ export function useWebSocket(symbol?: string, timeframe?: string) {
   } = useMarketStore();
 
   const connect = useCallback(() => {
+    // Prevent multiple connection attempts
+    if (isConnectingRef.current || (wsRef.current && wsRef.current.readyState === WebSocket.CONNECTING)) {
+      return;
+    }
+
+    // Close existing connection if it exists
+    if (wsRef.current) {
+      const currentState = wsRef.current.readyState;
+      if (currentState === WebSocket.OPEN || currentState === WebSocket.CONNECTING) {
+        wsRef.current.close();
+      }
+      wsRef.current = null;
+    }
+
     try {
+      isConnectingRef.current = true;
       const ws = new WebSocket(WS_URL);
       wsRef.current = ws;
 
       ws.onopen = () => {
+        if (!isMountedRef.current) {
+          ws.close();
+          return;
+        }
         console.log("WebSocket connected to:", WS_URL);
+        isConnectingRef.current = false;
         reconnectAttempts.current = 0;
         reconnectDelay.current = 1000;
         setError(null);
@@ -72,28 +94,40 @@ export function useWebSocket(symbol?: string, timeframe?: string) {
       };
 
       ws.onerror = (error) => {
+        if (!isMountedRef.current) return;
         console.error("WebSocket error:", error);
+        isConnectingRef.current = false;
         setError("WebSocket connection error");
       };
 
-      ws.onclose = () => {
-        console.log("WebSocket disconnected");
+      ws.onclose = (event) => {
+        if (!isMountedRef.current) return;
+        console.log("WebSocket disconnected", event.code, event.reason);
+        isConnectingRef.current = false;
         wsRef.current = null;
 
-        // Attempt reconnection
-        if (reconnectAttempts.current < maxReconnectAttempts) {
-          reconnectAttempts.current++;
-          reconnectTimeoutRef.current = setTimeout(() => {
-            connect();
-          }, reconnectDelay.current);
-          reconnectDelay.current = Math.min(reconnectDelay.current * 2, 30000); // Max 30 seconds
-        } else {
-          setError("WebSocket connection lost. Please refresh the page.");
+        // Only attempt reconnection if it wasn't a manual close (code 1000)
+        if (event.code !== 1000 && isMountedRef.current) {
+          // Attempt reconnection
+          if (reconnectAttempts.current < maxReconnectAttempts) {
+            reconnectAttempts.current++;
+            reconnectTimeoutRef.current = setTimeout(() => {
+              if (isMountedRef.current) {
+                connect();
+              }
+            }, reconnectDelay.current);
+            reconnectDelay.current = Math.min(reconnectDelay.current * 2, 30000); // Max 30 seconds
+          } else {
+            setError("WebSocket connection lost. Please refresh the page.");
+          }
         }
       };
     } catch (error) {
       console.error("Error connecting WebSocket:", error);
-      setError("Failed to connect to WebSocket");
+      isConnectingRef.current = false;
+      if (isMountedRef.current) {
+        setError("Failed to connect to WebSocket");
+      }
     }
   }, [symbol, timeframe, selectedSymbol, selectedTimeframe, setError]);
 
@@ -165,24 +199,35 @@ export function useWebSocket(symbol?: string, timeframe?: string) {
       reconnectTimeoutRef.current = null;
     }
     if (wsRef.current) {
-      wsRef.current.close();
+      const currentState = wsRef.current.readyState;
+      // Only close if not already closed or closing
+      if (currentState === WebSocket.OPEN || currentState === WebSocket.CONNECTING) {
+        wsRef.current.close(1000, "Component unmounting"); // 1000 = normal closure
+      }
       wsRef.current = null;
     }
+    isConnectingRef.current = false;
   }, []);
 
   useEffect(() => {
+    isMountedRef.current = true;
+
     // Disconnect previous connection
     disconnect();
 
-    // Always try to connect if we have a WebSocket URL
-    if (WS_URL) {
-      connect();
-    } else {
-      // Fallback to polling if WebSocket is not available
-      console.log("WebSocket not configured, using REST API polling");
-    }
+    // Small delay to ensure previous connection is fully closed
+    const connectTimeout = setTimeout(() => {
+      if (isMountedRef.current && WS_URL) {
+        connect();
+      } else if (!WS_URL) {
+        // Fallback to polling if WebSocket is not available
+        console.log("WebSocket not configured, using REST API polling");
+      }
+    }, 100);
 
     return () => {
+      isMountedRef.current = false;
+      clearTimeout(connectTimeout);
       disconnect();
     };
   }, [symbol, timeframe, selectedSymbol, selectedTimeframe, connect, disconnect]);
