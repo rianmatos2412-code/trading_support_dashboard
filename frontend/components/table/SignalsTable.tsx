@@ -360,7 +360,20 @@ export function SignalsTable({ signals, onRowClick }: SignalsTableProps) {
                     </Badge>
                   </td>
                   <td className="px-4 py-3 text-right font-medium">
-                    {formatPrice(signal.entry1 || signal.price)}
+                    <div className="flex flex-col items-end gap-1">
+                      <span>{formatPrice(signal.entry1 || signal.price)}</span>
+                      {signal.sl && (signal.entry1 || signal.price) && (
+                        <span className="text-xs text-muted-foreground">
+                          {(() => {
+                            const entry = signal.entry1 || signal.price || 0;
+                            const sl = signal.sl;
+                            const diff = Math.abs(entry - sl);
+                            const diffPercent = entry > 0 ? ((diff / entry) * 100).toFixed(2) : "0.00";
+                            return `${formatPrice(diff)} (${diffPercent}%)`;
+                          })()}
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="px-4 py-3 text-right text-red-400">
                     {signal.sl ? formatPrice(signal.sl) : "-"}

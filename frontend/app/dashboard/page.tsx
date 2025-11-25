@@ -218,6 +218,13 @@ export default function DashboardPage() {
   // Fetch symbol data for SymbolManager
   const { symbols } = useSymbolData();
   const symbolData = Array.isArray(symbols) ? symbols : [];
+  
+  // Get current price for selected symbol
+  const currentSymbolData = symbolData.find((s) => s.symbol === selectedSymbol);
+  const currentPrice = currentSymbolData?.price ?? null;
+  
+  // Get entry price from latest signal
+  const entryPrice = latestSignal?.entry1 || latestSignal?.price || null;
 
   // Load symbol/timeframe metadata
   const loadMetadata = useCallback(async () => {
@@ -585,7 +592,11 @@ export default function DashboardPage() {
             <div className="space-y-4">
               {/* Market Score */}
               <Card className="p-6">
-                <MarketScore score={marketScore} />
+                <MarketScore 
+                  score={marketScore} 
+                  currentPrice={currentPrice}
+                  entryPrice={entryPrice}
+                />
               </Card>
 
               {/* Signal Info */}
