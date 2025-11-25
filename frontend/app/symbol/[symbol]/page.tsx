@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useMarketStore } from "@/stores/useMarketStore";
 import { fetchSignals, TradingSignal, fetchCandles, Candle, fetchSymbolDetails, SymbolDetails } from "@/lib/api";
@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ConfluenceBadges } from "@/components/ui/ConfluenceBadge";
 import { formatPrice, formatTimestamp, formatNumber, formatSupply, formatPercent } from "@/lib/utils";
-import { ArrowLeft, TrendingUp, TrendingDown, ArrowUp, ArrowDown } from "lucide-react";
+import { ArrowLeft, TrendingUp, TrendingDown, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { useWebSocket } from "@/hooks/useWebSocket";
@@ -45,6 +45,8 @@ export default function SymbolDetailPage() {
     long: 0,
     short: 0,
   });
+  const [sortField, setSortField] = useState<"price_score" | "direction" | "timestamp">("price_score");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
 
   // WebSocket connection for real-time updates
   useWebSocket(symbol, selectedTimeframe);
@@ -151,6 +153,63 @@ export default function SymbolDetailPage() {
     return unsubscribe;
   }, [symbol]);
 
+  // Sort signals based on sortField and sortDirection
+  const sortedSignals = useMemo(() => {
+    const sorted = [...signals].sort((a, b) => {
+      let aValue: any;
+      let bValue: any;
+
+      switch (sortField) {
+        case "price_score":
+          const aEntryPrice = a.entry1 || a.price || 0;
+          const aCurrentPrice = symbolDetails?.price ?? 0;
+          const bEntryPrice = b.entry1 || b.price || 0;
+          const bCurrentPrice = symbolDetails?.price ?? 0;
+          aValue = aEntryPrice > 0 ? Math.abs(aCurrentPrice - aEntryPrice) / aEntryPrice : 0;
+          bValue = bEntryPrice > 0 ? Math.abs(bCurrentPrice - bEntryPrice) / bEntryPrice : 0;
+          break;
+        case "direction":
+          aValue = a.direction;
+          bValue = b.direction;
+          break;
+        case "timestamp":
+          aValue = new Date(a.timestamp).getTime();
+          bValue = new Date(b.timestamp).getTime();
+          break;
+        default:
+          return 0;
+      }
+
+      if (typeof aValue === "string" && typeof bValue === "string") {
+        return sortDirection === "asc"
+          ? aValue.localeCompare(bValue)
+          : bValue.localeCompare(aValue);
+      }
+
+      return sortDirection === "asc"
+        ? (aValue as number) - (bValue as number)
+        : (bValue as number) - (aValue as number);
+    });
+
+    return sorted;
+  }, [signals, sortField, sortDirection, symbolDetails?.price]);
+
+  const handleSort = (field: "price_score" | "direction" | "timestamp") => {
+    if (sortField === field) {
+      setSortDirection(sortDirection === "asc" ? "desc" : "asc");
+    } else {
+      setSortField(field);
+      setSortDirection("asc");
+    }
+  };
+
+  const SortIcon = ({ field }: { field: "price_score" | "direction" | "timestamp" }) => {
+    if (sortField !== field) {
+      return <ArrowUpDown className="h-3 w-3 ml-1 opacity-50" />;
+    }
+    return sortDirection === "asc" ? <ArrowUp className="h-3 w-3 ml-1" /> : <ArrowDown className="h-3 w-3 ml-1" />;
+  };
+
   const displaySymbol = symbol.replace("USDT", "/USDT");
   const priceChangeColor = priceChange24h !== null && priceChange24h >= 0 ? "text-green-400" : "text-red-400";
   const priceChangeIcon = priceChange24h !== null && priceChange24h >= 0 ? ArrowUp : ArrowDown;
@@ -169,342 +228,265 @@ export default function SymbolDetailPage() {
 
   return (
     <div className="min-h-screen bg-background p-4 md:p-6">
-      <div className="max-w-[1920px] mx-auto space-y-4">
+      <div className="mx-auto max-w-[1920px] space-y-6">
         {/* Symbol Information Header */}
-        <Card className="p-6">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
+        <Card className="p-6 shadow-sm border-border/60">
+          <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex flex-wrap items-center gap-4">
               <Link href="/dashboard">
-                <Button variant="ghost" size="sm">
+                <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground">
                   <ArrowLeft className="h-4 w-4 mr-2" />
                   Back
                 </Button>
               </Link>
-              
-              {/* Symbol Image */}
               {symbolDetails?.image_path ? (
                 <img
                   src={symbolDetails.image_path}
                   alt={displaySymbol}
-                  className="w-16 h-16 rounded-full object-cover"
+                  className="w-16 h-16 rounded-full object-cover shadow-inner"
                   onError={(e) => {
                     (e.target as HTMLImageElement).style.display = "none";
                   }}
                 />
               ) : (
-                <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center">
+                <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center shadow-inner">
                   <span className="text-lg font-medium text-muted-foreground">
                     {symbolDetails?.base_asset?.charAt(0) || displaySymbol.charAt(0)}
                   </span>
                 </div>
               )}
-              
               <div>
-                <h1 className="text-3xl font-bold text-foreground">{displaySymbol}</h1>
+                <p className="text-sm uppercase tracking-wide text-muted-foreground">Symbol Overview</p>
+                <h1 className="text-3xl font-bold leading-tight text-foreground">{displaySymbol}</h1>
                 <p className="text-sm text-muted-foreground mt-1">
                   {symbolDetails?.base_asset || ""} / {symbolDetails?.quote_asset || "USDT"}
                 </p>
               </div>
             </div>
-
-            {/* Price and Change */}
-            <div className="text-right">
-              <div className="text-3xl font-bold text-foreground">
+            <div className="space-y-2 text-right">
+              <div className="text-4xl font-semibold text-foreground">
                 {formatPrice(symbolDetails?.price)}
               </div>
               {priceChange24h !== null && (
-                <div className={`flex items-center gap-1 mt-1 ${priceChangeColor}`}>
-                  {priceChange24h >= 0 ? (
-                    <ArrowUp className="h-4 w-4" />
-                  ) : (
-                    <ArrowDown className="h-4 w-4" />
-                  )}
-                  <span className="text-lg font-semibold">
-                    {formatPercent(priceChange24h)}
-                  </span>
-                  <span className="text-sm text-muted-foreground">(24h)</span>
+                <div className={`flex items-center justify-end gap-2 text-base font-semibold ${priceChangeColor}`}>
+                  {priceChange24h >= 0 ? <ArrowUp className="h-4 w-4" /> : <ArrowDown className="h-4 w-4" />}
+                  {formatPercent(priceChange24h)}
+                  <span className="text-xs text-muted-foreground">(24h)</span>
                 </div>
               )}
             </div>
           </div>
         </Card>
 
-        {/* Market Data Stats */}
-        {symbolDetails && (
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
-            <Card className="p-4">
-              <div className="text-sm text-muted-foreground mb-1">Market Cap</div>
-              <div className="text-xl font-bold">
-                {formatNumber(symbolDetails.market_cap)}
+        {/* Responsive layout with primary focus on chart */}
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,2.1fr)_minmax(280px,1fr)]">
+          {/* Chart + controls */}
+          <Card className="p-6 shadow-md border-border/60">
+            <div className="flex flex-wrap gap-4 items-center justify-between border-b pb-4">
+              <div className="flex items-center gap-3">
+                <Label htmlFor="timeframe" className="text-sm text-muted-foreground">Timeframe</Label>
+                <TimeframeSelector />
               </div>
-            </Card>
-            <Card className="p-4">
-              <div className="text-sm text-muted-foreground mb-1">24h Volume</div>
-              <div className="text-xl font-bold">
-                {formatNumber(symbolDetails.volume_24h)}
+              <div className="flex flex-wrap gap-3">
+                {[
+                  { id: "show-swings", label: "Swings", value: chartSettings.showSwings, key: "showSwings" },
+                  { id: "show-entry", label: "Entry/SL/TP", value: chartSettings.showEntrySLTP, key: "showEntrySLTP" },
+                  { id: "show-rsi", label: "RSI", value: chartSettings.showRSI, key: "showRSI" },
+                  { id: "show-tooltip", label: "Tooltip", value: chartSettings.showTooltip, key: "showTooltip" },
+                  { id: "show-ma7", label: "MA(7)", value: chartSettings.showMA7, key: "showMA7" },
+                  { id: "show-ma25", label: "MA(25)", value: chartSettings.showMA25, key: "showMA25" },
+                  { id: "show-ma99", label: "MA(99)", value: chartSettings.showMA99, key: "showMA99" },
+                ].map((setting) => (
+                  <div className="flex items-center gap-2" key={setting.id}>
+                    <Switch
+                      id={setting.id}
+                      checked={setting.value}
+                      onCheckedChange={(checked: boolean) =>
+                        updateChartSettings({ [setting.key]: checked } as Partial<typeof chartSettings>)
+                      }
+                    />
+                    <Label htmlFor={setting.id} className="text-xs md:text-sm text-muted-foreground cursor-pointer">
+                      {setting.label}
+                    </Label>
+                  </div>
+                ))}
               </div>
-            </Card>
-            <Card className="p-4">
-              <div className="text-sm text-muted-foreground mb-1">Circulating Supply</div>
-              <div className="text-xl font-bold">
-                {formatSupply(symbolDetails.circulating_supply)}
+            </div>
+            <div className="pt-6">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h2 className="text-xl font-semibold text-foreground">Price Action</h2>
+                  <p className="text-xs text-muted-foreground">
+                    Live candles for {displaySymbol} • Timeframe {selectedTimeframe?.toUpperCase()}
+                  </p>
+                </div>
               </div>
-            </Card>
-            <Card className="p-4">
-              <div className="text-sm text-muted-foreground mb-1">Current Price</div>
-              <div className="text-xl font-bold">
-                {formatPrice(symbolDetails.price)}
+              <div className="rounded-xl border border-border/50 bg-card/50 p-2 shadow-inner">
+                <ChartContainer height={520} />
               </div>
-            </Card>
-            <Card className="p-4">
-              <div className="text-sm text-muted-foreground mb-1">24h Change</div>
-              <div className={`text-xl font-bold ${priceChangeColor}`}>
-                {priceChange24h !== null ? formatPercent(priceChange24h) : "-"}
+            </div>
+          </Card>
+
+          {/* Supporting cards */}
+          <div className="space-y-6">
+            {symbolDetails && (
+              <Card className="p-5 shadow-sm border-border/60">
+                <p className="text-sm font-medium text-muted-foreground mb-4">Market Metrics</p>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="rounded-lg border border-border/50 bg-muted/20 p-3">
+                    <p className="text-xs text-muted-foreground uppercase tracking-wide">Market Cap</p>
+                    <p className="text-lg font-semibold mt-1">{formatNumber(symbolDetails.market_cap)}</p>
+                  </div>
+                  <div className="rounded-lg border border-border/50 bg-muted/20 p-3">
+                    <p className="text-xs text-muted-foreground uppercase tracking-wide">24h Volume</p>
+                    <p className="text-lg font-semibold mt-1">{formatNumber(symbolDetails.volume_24h)}</p>
+                  </div>
+                  <div className="rounded-lg border border-border/50 bg-muted/20 p-3">
+                    <p className="text-xs text-muted-foreground uppercase tracking-wide">Circulating Supply</p>
+                    <p className="text-lg font-semibold mt-1">{formatSupply(symbolDetails.circulating_supply)}</p>
+                  </div>
+                  <div className="rounded-lg border border-border/50 bg-muted/20 p-3">
+                    <p className="text-xs text-muted-foreground uppercase tracking-wide">24h Change</p>
+                    <p className={`text-lg font-semibold mt-1 ${priceChangeColor}`}>
+                      {priceChange24h !== null ? formatPercent(priceChange24h) : "-"}
+                    </p>
+                  </div>
+                </div>
+              </Card>
+            )}
+
+            <Card className="p-5 shadow-sm border-border/60">
+              <p className="text-sm font-medium text-muted-foreground mb-4">Signal Snapshot</p>
+              <div className="flex flex-col gap-4">
+                <div className="rounded-lg border border-border/50 bg-muted/10 p-4">
+                  <p className="text-xs text-muted-foreground uppercase tracking-wide">Total Signals</p>
+                  <p className="text-3xl font-semibold text-foreground mt-1">{stats.total}</p>
+                </div>
+                <div className="rounded-lg border border-border/50 bg-muted/10 p-4">
+                  <p className="text-xs text-muted-foreground uppercase tracking-wide">Bias</p>
+                  <div className="mt-2 flex items-center gap-3 text-sm">
+                    <span className="font-semibold text-emerald-400">Long {stats.long}</span>
+                    <span className="text-muted-foreground">/</span>
+                    <span className="font-semibold text-rose-400">Short {stats.short}</span>
+                  </div>
+                </div>
               </div>
             </Card>
           </div>
-        )}
-
-        {/* Stats Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-          <Card className="p-4">
-            <div className="text-sm text-muted-foreground mb-1">Total Signals</div>
-            <div className="text-2xl font-bold">{stats.total}</div>
-          </Card>
-          <Card className="p-4">
-            <div className="text-sm text-muted-foreground mb-1">Long / Short</div>
-            <div className="text-sm font-medium">
-              <span className="text-green-400">{stats.long}</span> /{" "}
-              <span className="text-red-400">{stats.short}</span>
-            </div>
-          </Card>
         </div>
 
-        {/* Chart Controls */}
-        <Card className="p-4">
-          <div className="flex flex-wrap items-center gap-4 mb-4">
-            <div className="flex items-center gap-2">
-              <Label htmlFor="timeframe">Timeframe:</Label>
-              <TimeframeSelector />
+        {/* Signal History Table */}
+        <Card className="p-6 shadow-md border-border/60">
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+            <div>
+              <h2 className="text-xl font-semibold text-foreground">Signal History</h2>
+              <p className="text-xs text-muted-foreground">Latest {signals.length} strategy signals</p>
             </div>
-            <div className="flex-1" />
-            
-            {/* Chart Toggle Controls */}
-            <div className="flex items-center gap-4 flex-wrap">
-              <div className="flex items-center gap-2">
-                <Switch
-                  id="show-swings"
-                  checked={chartSettings.showSwings}
-                  onCheckedChange={(checked: boolean) =>
-                    updateChartSettings({ showSwings: checked })
-                  }
-                />
-                <Label htmlFor="show-swings" className="text-sm cursor-pointer">
-                  Swings
-                </Label>
-              </div>
-              <div className="flex items-center gap-2">
-                <Switch
-                  id="show-entry"
-                  checked={chartSettings.showEntrySLTP}
-                  onCheckedChange={(checked: boolean) =>
-                    updateChartSettings({ showEntrySLTP: checked })
-                  }
-                />
-                <Label htmlFor="show-entry" className="text-sm cursor-pointer">
-                  Entry/SL/TP
-                </Label>
-              </div>
-              <div className="flex items-center gap-2">
-                <Switch
-                  id="show-rsi"
-                  checked={chartSettings.showRSI}
-                  onCheckedChange={(checked: boolean) =>
-                    updateChartSettings({ showRSI: checked })
-                  }
-                />
-                <Label htmlFor="show-rsi" className="text-sm cursor-pointer">
-                  RSI
-                </Label>
-              </div>
-              <div className="flex items-center gap-2">
-                <Switch
-                  id="show-tooltip"
-                  checked={chartSettings.showTooltip}
-                  onCheckedChange={(checked: boolean) =>
-                    updateChartSettings({ showTooltip: checked })
-                  }
-                />
-                <Label htmlFor="show-tooltip" className="text-sm cursor-pointer">
-                  Tooltip
-                </Label>
-              </div>
-              <div className="flex items-center gap-2">
-                <Switch
-                  id="show-ma7"
-                  checked={chartSettings.showMA7}
-                  onCheckedChange={(checked: boolean) =>
-                    updateChartSettings({ showMA7: checked })
-                  }
-                />
-                <Label htmlFor="show-ma7" className="text-sm cursor-pointer">
-                  MA(7)
-                </Label>
-              </div>
-              <div className="flex items-center gap-2">
-                <Switch
-                  id="show-ma25"
-                  checked={chartSettings.showMA25}
-                  onCheckedChange={(checked: boolean) =>
-                    updateChartSettings({ showMA25: checked })
-                  }
-                />
-                <Label htmlFor="show-ma25" className="text-sm cursor-pointer">
-                  MA(25)
-                </Label>
-              </div>
-              <div className="flex items-center gap-2">
-                <Switch
-                  id="show-ma99"
-                  checked={chartSettings.showMA99}
-                  onCheckedChange={(checked: boolean) =>
-                    updateChartSettings({ showMA99: checked })
-                  }
-                />
-                <Label htmlFor="show-ma99" className="text-sm cursor-pointer">
-                  MA(99)
-                </Label>
-              </div>
-            </div>
+            <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground" onClick={() => router.push("/dashboard")}>
+              View on Dashboard
+            </Button>
           </div>
-        </Card>
-
-        {/* Chart */}
-        <Card className="p-4">
-          <div className="mb-4">
-            <h2 className="text-lg font-semibold">Price Chart - {selectedTimeframe}</h2>
-          </div>
-          <ChartContainer height={500} />
-        </Card>
-
-        {/* Signal History */}
-        <Card className="p-4">
-          <h2 className="text-lg font-semibold mb-4">Signal History</h2>
-          <div className="space-y-2 max-h-[600px] overflow-y-auto">
-            {signals.map((signal, index) => (
-              <motion.div
-                key={signal.id || index}
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: index * 0.05 }}
-                className="p-4 border rounded-lg hover:bg-muted/50 transition-colors cursor-pointer"
-                onClick={() => {
-                  setLatestSignal(signal);
-                  router.push("/dashboard");
-                }}
+          <div className="rounded-xl border border-border/50 overflow-hidden">
+            <div className="hidden md:grid md:grid-cols-[110px_120px_1fr_160px_120px] bg-muted/40 px-4 py-3 text-xs font-semibold text-muted-foreground">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-auto p-0 font-semibold text-muted-foreground hover:text-foreground justify-start"
+                onClick={() => handleSort("direction")}
               >
-                <div className="flex items-start justify-between">
-                  <div className="flex-1 space-y-2">
-                    <div className="flex items-center gap-3">
-                      <Badge
-                        variant={signal.direction === "long" ? "long" : "short"}
-                        className="flex items-center gap-1"
-                      >
-                        {signal.direction === "long" ? (
-                          <TrendingUp className="h-3 w-3" />
-                        ) : (
-                          <TrendingDown className="h-3 w-3" />
-                        )}
-                        {signal.direction.toUpperCase()}
-                      </Badge>
-                      <span
-                        className={`text-sm font-semibold ${
-                          (signal.market_score || 0) >= 90
-                            ? "text-emerald-400"
-                            : (signal.market_score || 0) >= 75
+                Direction
+                <SortIcon field="direction" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-auto p-0 font-semibold text-muted-foreground hover:text-foreground justify-start"
+                onClick={() => handleSort("price_score")}
+              >
+                Score
+                <SortIcon field="price_score" />
+              </Button>
+              <span>Entries / Targets</span>
+              <span>Confluence</span>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-auto p-0 font-semibold text-muted-foreground hover:text-foreground justify-end"
+                onClick={() => handleSort("timestamp")}
+              >
+                Timestamp
+                <SortIcon field="timestamp" />
+              </Button>
+            </div>
+            <div className="divide-y divide-border/60 max-h-[640px] overflow-y-auto">
+              {sortedSignals.map((signal, index) => (
+                <motion.div
+                  key={signal.id || index}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: index * 0.02 }}
+                  className="grid gap-3 px-4 py-4 text-sm md:grid-cols-[110px_120px_1fr_160px_120px] items-start md:items-center hover:bg-muted/30"
+                >
+                  <div className="flex items-center gap-2">
+                    <Badge variant={signal.direction === "long" ? "long" : "short"} className="px-2 py-1 text-xs">
+                      {signal.direction === "long" ? (
+                        <TrendingUp className="h-3 w-3 mr-1" />
+                      ) : (
+                        <TrendingDown className="h-3 w-3 mr-1" />
+                      )}
+                      {signal.direction.toUpperCase()}
+                    </Badge>
+                  </div>
+                  <div className="font-semibold">
+                    {(() => {
+                      const entryPrice = signal.entry1 || signal.price || 0;
+                      const currentPrice = symbolDetails?.price ?? null;
+
+                      if (currentPrice !== null && entryPrice > 0) {
+                        const priceScore = Math.abs(currentPrice - entryPrice) / entryPrice;
+                        const percentage = (priceScore * 100).toFixed(2);
+                        const colorClass =
+                          priceScore < 0.01
                             ? "text-green-400"
-                            : "text-yellow-400"
-                        }`}
-                      >
-                        Score: {signal.market_score || 0}
-                      </span>
-                      {signal.confluence && (
-                        <ConfluenceBadges confluence={signal.confluence} />
-                      )}
-                      <span className="text-xs text-muted-foreground">
-                        {formatTimestamp(signal.timestamp)}
-                      </span>
-                    </div>
+                            : priceScore < 0.03
+                            ? "text-yellow-400"
+                            : "text-red-400";
 
-                    <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
-                      <div>
-                        <span className="text-muted-foreground">Entry: </span>
-                        <span className="font-medium">
-                          {formatPrice(signal.entry1 || signal.price)}
-                        </span>
-                      </div>
-                      {signal.sl && (
-                        <div>
-                          <span className="text-muted-foreground">SL: </span>
-                          <span className="font-medium text-red-400">
-                            {formatPrice(signal.sl)}
-                          </span>
-                        </div>
-                      )}
-                      {signal.tp1 && (
-                        <div>
-                          <span className="text-muted-foreground">TP1: </span>
-                          <span className="font-medium text-green-400">
-                            {formatPrice(signal.tp1)}
-                          </span>
-                        </div>
-                      )}
-                      {signal.tp2 && (
-                        <div>
-                          <span className="text-muted-foreground">TP2: </span>
-                          <span className="font-medium text-green-400">
-                            {formatPrice(signal.tp2)}
-                          </span>
-                        </div>
-                      )}
-                      {signal.tp3 && (
-                        <div>
-                          <span className="text-muted-foreground">TP3: </span>
-                          <span className="font-medium text-green-400">
-                            {formatPrice(signal.tp3)}
-                          </span>
-                        </div>
-                      )}
-                    </div>
+                        return <span className={colorClass}>{percentage}%</span>;
+                      }
 
+                      return <span className="text-muted-foreground">-</span>;
+                    })()}
+                  </div>
+                  <div className="space-y-1 text-xs text-muted-foreground">
+                    <div className="flex flex-wrap gap-4 text-foreground">
+                      <span>Entry {formatPrice(signal.entry1 || signal.price)}</span>
+                      {signal.sl && <span>SL {formatPrice(signal.sl)}</span>}
+                      {signal.tp1 && <span>TP1 {formatPrice(signal.tp1)}</span>}
+                      {signal.tp2 && <span>TP2 {formatPrice(signal.tp2)}</span>}
+                      {signal.tp3 && <span>TP3 {formatPrice(signal.tp3)}</span>}
+                    </div>
                     {signal.swing_high && signal.swing_low && (
-                      <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                        <span>
-                          Swing High: <span className="text-foreground">{formatPrice(signal.swing_high)}</span>
-                        </span>
-                        <span>
-                          Swing Low: <span className="text-foreground">{formatPrice(signal.swing_low)}</span>
-                        </span>
-                      </div>
-                    )}
-
-                    {signal.risk_reward_ratio && (
-                      <div className="text-xs text-muted-foreground">
-                        Risk/Reward:{" "}
-                        <span className="text-foreground font-medium">
-                          {signal.risk_reward_ratio.toFixed(2)}x
-                        </span>
+                      <div className="flex flex-wrap gap-4">
+                        <span>Swing High {formatPrice(signal.swing_high)}</span>
+                        <span>Swing Low {formatPrice(signal.swing_low)}</span>
                       </div>
                     )}
                   </div>
+                  <div className="text-xs text-muted-foreground">
+                    {signal.confluence ? <ConfluenceBadges confluence={signal.confluence} /> : "—"}
+                  </div>
+                  <div className="text-right text-xs text-muted-foreground">
+                    {formatTimestamp(signal.timestamp)}
+                  </div>
+                </motion.div>
+              ))}
+              {signals.length === 0 && (
+                <div className="px-4 py-10 text-center text-sm text-muted-foreground">
+                  No signals found for this symbol
                 </div>
-              </motion.div>
-            ))}
-            {signals.length === 0 && (
-              <div className="text-center py-8 text-muted-foreground">
-                No signals found for this symbol
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </Card>
       </div>
