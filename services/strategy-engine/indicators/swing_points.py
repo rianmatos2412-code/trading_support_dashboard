@@ -442,3 +442,4 @@ def filter_rate(
     clean_highs, clean_lows = enforce_strict_alternation(clean_highs, clean_lows)
     
     return clean_highs, clean_lows
+

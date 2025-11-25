@@ -5,15 +5,17 @@ This module provides functions to detect support and resistance levels in price 
 Support levels are price points where the price tends to bounce upward.
 Resistance levels are price points where the price tends to bounce downward.
 """
+from typing import List, Tuple, Optional
+import pandas as pd
 
 
 def support(
-    df, 
+    df: pd.DataFrame, 
     candle_index: int, 
     before_candle_count: int, 
     after_candle_count: int, 
     high_timeframe_flag: bool
-) -> bool | None:
+) -> Optional[bool]:
     """
     Check if the candle at the given index forms a support level.
     
@@ -74,12 +76,12 @@ def support(
 
 
 def resistance(
-    df, 
+    df: pd.DataFrame, 
     candle_index: int, 
     before_candle_count: int, 
     after_candle_count: int, 
     high_timeframe_flag: bool
-) -> bool | None:
+) -> Optional[bool]:
     """
     Check if the candle at the given index forms a resistance level.
     
@@ -137,3 +139,77 @@ def resistance(
     except (KeyError, IndexError, AttributeError, TypeError) as e:
         # Return None on any error (missing columns, index out of range, etc.)
         return None
+
+
+def get_support_resistance_levels(
+    timeframe_ticker_df: pd.DataFrame, 
+    high_timeframe_flag: bool,
+    sensible_window: int = 2
+) -> Tuple[List[Tuple[int, float]], List[Tuple[int, float]]]:
+    """
+    Calculate support and resistance levels from the DataFrame.
+    
+    Args:
+        timeframe_ticker_df: pandas DataFrame with OHLC data (should have 'unix' column for timestamps)
+        high_timeframe_flag: If True, uses open/close for HTF analysis. If False, uses low/high for LTF analysis.
+        sensible_window: Number of candles to check after the candidate level (default: 2)
+            
+    Returns:
+        Tuple of (support_level_list, resistance_level_list) where each list contains
+        tuples of (unix_timestamp, price)
+    """
+    support_level_list = []
+    resistance_level_list = []
+    
+    # Input validation
+    if timeframe_ticker_df is None or not hasattr(timeframe_ticker_df, '__len__'):
+        return support_level_list, resistance_level_list
+    
+    if len(timeframe_ticker_df) < 4:  # Need at least 4 rows for range(3, len-1) to work
+        return support_level_list, resistance_level_list
+    
+    # Check required columns exist
+    required_columns = ['low', 'high']
+    if not all(col in timeframe_ticker_df.columns for col in required_columns):
+        return support_level_list, resistance_level_list
+    
+    # Check if 'unix' column exists for timestamps
+    has_unix = 'unix' in timeframe_ticker_df.columns
+            
+    # backward 3, forward sensible_window
+    for sens_row in range(3, len(timeframe_ticker_df) - 1):
+        try:
+            # Get unix timestamp if available, otherwise use index as fallback
+            if has_unix and pd.notna(timeframe_ticker_df['unix'].iloc[sens_row]):
+                unix_timestamp = int(timeframe_ticker_df['unix'].iloc[sens_row])
+            else:
+                # Fallback to index if unix column is not available
+                unix_timestamp = sens_row
+            
+            # Check for support level
+            support_result = support(
+                timeframe_ticker_df, 
+                sens_row, 
+                3,  # before_candle_count
+                sensible_window,  # after_candle_count
+                high_timeframe_flag
+            )
+            if support_result is True:
+                support_level_list.append((unix_timestamp, float(timeframe_ticker_df.low[sens_row])))
+            
+            # Check for resistance level
+            resistance_result = resistance(
+                timeframe_ticker_df, 
+                sens_row, 
+                3,  # before_candle_count
+                sensible_window,  # after_candle_count
+                high_timeframe_flag
+            )
+            if resistance_result is True:
+                resistance_level_list.append((unix_timestamp, float(timeframe_ticker_df.high[sens_row])))
+                
+        except (KeyError, IndexError, TypeError) as e:
+            # Skip this row if there's an error accessing the data
+            continue
+        
+    return support_level_list, resistance_level_list
