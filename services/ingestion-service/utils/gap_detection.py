@@ -3,7 +3,7 @@ import sys
 import os
 import asyncio
 from datetime import datetime, timezone
-from typing import List, Set, Optional
+from typing import List, Set, Optional, Dict, Tuple
 from sqlalchemy import text
 import structlog
 import aiohttp
@@ -187,6 +187,37 @@ async def backfill_recent_candles(
         last_timestamp=candles[-1].timestamp.isoformat() if candles else None
     )
     
+    # Exclude the latest candle as it may still be in progress (not closed yet)
+    # Only process completed candles
+    if len(candles) > 1:
+        latest_candle = candles[-1]
+        candles = candles[:-1]  # Remove the last candle
+        logger.debug(
+            "backfill_latest_candle_excluded",
+            symbol=cleaned_symbol,
+            timeframe=timeframe,
+            excluded_timestamp=latest_candle.timestamp.isoformat(),
+            processed_count=len(candles)
+        )
+    elif len(candles) == 1:
+        # Only one candle - exclude it as it's likely incomplete
+        logger.debug(
+            "backfill_single_candle_excluded",
+            symbol=cleaned_symbol,
+            timeframe=timeframe,
+            excluded_timestamp=candles[0].timestamp.isoformat()
+        )
+        candles = []
+    
+    if not candles:
+        logger.info(
+            "backfill_no_completed_candles",
+            symbol=cleaned_symbol,
+            timeframe=timeframe,
+            message="All candles excluded (latest candle may be incomplete)"
+        )
+        return 0
+    
     # Batch check which candles already exist in database
     with DatabaseManager() as db:
         # Get symbol_id and timeframe_id (use cleaned symbol)
@@ -204,25 +235,26 @@ async def backfill_recent_candles(
             return 0
         
         # Extract timestamps from candles and batch check which ones exist
+        # Also fetch existing OHLCV data for validation
         candle_timestamps = [c.timestamp for c in candles]
         
-        if not candle_timestamps:
-            existing_timestamps: Set[datetime] = set()
-        else:
+        # Dictionary to store existing candle data: timestamp -> (open, high, low, close, volume)
+        existing_candles_data: Dict[datetime, Tuple[float, float, float, float, float]] = {}
+        existing_timestamps: Set[datetime] = set()
+        
+        if candle_timestamps:
             # Use a single efficient query with IN clause and explicit placeholders
             # Optimized: use larger chunks to reduce query count (400 candles = 1 query)
             chunk_size = 400  # Process all candles in one query (faster)
-            existing_timestamps: Set[datetime] = set()
             
             # Process in chunks if we have more than chunk_size timestamps
             for chunk_idx in range(0, len(candle_timestamps), chunk_size):
                 chunk_timestamps = candle_timestamps[chunk_idx:chunk_idx + chunk_size]
                 
-                # Build query with explicit placeholders - most reliable with SQLAlchemy
-                # Using bindparam approach for better performance
+                # Build query to fetch both timestamp and OHLCV data for validation
                 placeholders = ", ".join([f":ts{i}" for i in range(len(chunk_timestamps))])
                 query = text(f"""
-                    SELECT timestamp
+                    SELECT timestamp, open, high, low, close, volume
                     FROM ohlcv_candles
                     WHERE symbol_id = :symbol_id
                     AND timeframe_id = :timeframe_id
@@ -238,8 +270,17 @@ async def backfill_recent_candles(
                 
                 try:
                     result = db.execute(query, params)
-                    chunk_existing = {row[0] for row in result}
-                    existing_timestamps.update(chunk_existing)
+                    for row in result:
+                        ts = row[0]
+                        existing_timestamps.add(ts)
+                        # Store OHLCV data for comparison
+                        existing_candles_data[ts] = (
+                            float(row[1]),  # open
+                            float(row[2]),  # high
+                            float(row[3]),  # low
+                            float(row[4]),  # close
+                            float(row[5])   # volume
+                        )
                     
                     logger.debug(
                         "backfill_chunk_checked",
@@ -247,7 +288,7 @@ async def backfill_recent_candles(
                         timeframe=timeframe,
                         chunk=chunk_idx // chunk_size + 1,
                         chunk_size=len(chunk_timestamps),
-                        found=len(chunk_existing)
+                        found=len(existing_timestamps)
                     )
                 except Exception as e:
                     # Log error and continue with next chunk
@@ -266,11 +307,110 @@ async def backfill_recent_candles(
                         pass
                     continue
         
-        # Filter candles to only include missing ones
-        missing_candles = [
-            c for c in candles
-            if c.timestamp not in existing_timestamps
-        ]
+        # Separate candles into missing and existing for validation
+        missing_candles = []
+        candles_to_validate = []
+        
+        for candle in candles:
+            if candle.timestamp not in existing_timestamps:
+                missing_candles.append(candle)
+            else:
+                candles_to_validate.append(candle)
+        
+        # Validate and update existing candles if OHLCV data differs
+        # Use a small tolerance for floating point comparison (0.0001%)
+        tolerance = 0.000001  # Very small tolerance for floating point comparison
+        candles_to_update = []
+        
+        for candle in candles_to_validate:
+            if candle.timestamp in existing_candles_data:
+                existing_ohlcv = existing_candles_data[candle.timestamp]
+                new_open = float(candle.open)
+                new_high = float(candle.high)
+                new_low = float(candle.low)
+                new_close = float(candle.close)
+                new_volume = float(candle.volume)
+                
+                # Compare each OHLCV value with tolerance
+                open_diff = abs(new_open - existing_ohlcv[0])
+                high_diff = abs(new_high - existing_ohlcv[1])
+                low_diff = abs(new_low - existing_ohlcv[2])
+                close_diff = abs(new_close - existing_ohlcv[3])
+                volume_diff = abs(new_volume - existing_ohlcv[4])
+                
+                # Check if any value differs significantly (relative to the value)
+                # Use relative comparison for better accuracy
+                open_mismatch = new_open > 0 and (open_diff / new_open) > tolerance
+                high_mismatch = new_high > 0 and (high_diff / new_high) > tolerance
+                low_mismatch = new_low > 0 and (low_diff / new_low) > tolerance
+                close_mismatch = new_close > 0 and (close_diff / new_close) > tolerance
+                volume_mismatch = new_volume > 0 and (volume_diff / new_volume) > tolerance
+                
+                if open_mismatch or high_mismatch or low_mismatch or close_mismatch or volume_mismatch:
+                    candles_to_update.append(candle)
+                    logger.debug(
+                        "backfill_candle_mismatch_detected",
+                        symbol=cleaned_symbol,
+                        timeframe=timeframe,
+                        timestamp=candle.timestamp.isoformat(),
+                        existing_ohlcv=existing_ohlcv,
+                        new_ohlcv=(new_open, new_high, new_low, new_close, new_volume),
+                        differences={
+                            "open": open_diff,
+                            "high": high_diff,
+                            "low": low_diff,
+                            "close": close_diff,
+                            "volume": volume_diff
+                        }
+                    )
+        
+        # Update mismatched candles
+        if candles_to_update:
+            try:
+                update_stmt = text("""
+                    UPDATE ohlcv_candles
+                    SET open = :open,
+                        high = :high,
+                        low = :low,
+                        close = :close,
+                        volume = :volume
+                    WHERE symbol_id = :symbol_id
+                    AND timeframe_id = :timeframe_id
+                    AND timestamp = :timestamp
+                """)
+                
+                for candle in candles_to_update:
+                    db.execute(update_stmt, {
+                        "symbol_id": symbol_id,
+                        "timeframe_id": timeframe_id,
+                        "timestamp": candle.timestamp,
+                        "open": float(candle.open),
+                        "high": float(candle.high),
+                        "low": float(candle.low),
+                        "close": float(candle.close),
+                        "volume": float(candle.volume)
+                    })
+                
+                db.commit()
+                
+                logger.info(
+                    "backfill_candles_updated",
+                    symbol=cleaned_symbol,
+                    timeframe=timeframe,
+                    candles_updated=len(candles_to_update),
+                    first_timestamp=candles_to_update[0].timestamp.isoformat() if candles_to_update else None,
+                    last_timestamp=candles_to_update[-1].timestamp.isoformat() if candles_to_update else None
+                )
+            except Exception as e:
+                logger.error(
+                    "backfill_update_failed",
+                    symbol=cleaned_symbol,
+                    timeframe=timeframe,
+                    candles_count=len(candles_to_update),
+                    error=str(e),
+                    exc_info=True
+                )
+                db.rollback()
         
         logger.info(
             "backfill_candles_checked",
@@ -278,24 +418,25 @@ async def backfill_recent_candles(
             timeframe=timeframe,
             total_candles=len(candles),
             existing_candles=len(existing_timestamps),
-            missing_candles=len(missing_candles)
+            missing_candles=len(missing_candles),
+            candles_to_update=len(candles_to_update)
         )
         
         # Insert missing candles
+        inserted_count = 0
         if missing_candles:
             try:
                 binance_service.save_candles(db, missing_candles)
+                inserted_count = len(missing_candles)
                 
                 logger.info(
                     "backfill_candles_inserted",
                     symbol=cleaned_symbol,
                     timeframe=timeframe,
-                    candles_inserted=len(missing_candles),
+                    candles_inserted=inserted_count,
                     first_timestamp=missing_candles[0].timestamp.isoformat() if missing_candles else None,
                     last_timestamp=missing_candles[-1].timestamp.isoformat() if missing_candles else None
                 )
-                
-                return len(missing_candles)
             except Exception as e:
                 logger.error(
                     "backfill_insert_failed",
@@ -305,14 +446,18 @@ async def backfill_recent_candles(
                     error=str(e),
                     exc_info=True
                 )
-                return 0
-        else:
+        
+        # Return total count of candles processed (inserted + updated)
+        total_processed = inserted_count + len(candles_to_update)
+        
+        if total_processed == 0:
             logger.debug(
-                "backfill_no_missing_candles",
+                "backfill_no_changes",
                 symbol=cleaned_symbol,
                 timeframe=timeframe
             )
-            return 0
+        
+        return total_processed
 
 
 async def backfill_all_symbols_timeframes(
