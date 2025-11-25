@@ -81,3 +81,6 @@ WS_PING_TIMEOUT = int(os.getenv("WS_PING_TIMEOUT", "10"))  # WebSocket ping time
 DB_BATCH_SIZE = int(os.getenv("DB_BATCH_SIZE", "100"))  # Batch size for bulk database operations
 DB_CONNECTION_TIMEOUT = int(os.getenv("DB_CONNECTION_TIMEOUT", "10"))  # Database connection timeout
 
+# Strategy Engine Configuration
+STRATEGY_CANDLE_COUNT = int(os.getenv("STRATEGY_CANDLE_COUNT", "400"))  # Number of candles to use for strategy analysis
+

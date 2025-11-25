@@ -20,7 +20,7 @@ services:
       retries: 5
 
   redis:
-    image: redis:7-alpine
+    image: redis:latest
     container_name: trading_redis
     ports:
       - "6379:6379"
@@ -34,8 +34,8 @@ services:
 
   ingestion-service:
     build:
-      context: ./services/ingestion-service
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: services/ingestion-service/Dockerfile
     container_name: trading_ingestion
     environment:
       - DATABASE_URL=postgresql://trading_user:trading_pass@postgres:5432/trading_db
@@ -52,11 +52,11 @@ services:
       - ./shared:/app/shared
     restart: unless-stopped
 
-  processing-service:
+  strategy-engine:
     build:
-      context: ./services/processing-service
-      dockerfile: Dockerfile
-    container_name: trading_processing
+      context: .
+      dockerfile: services/strategy-engine/Dockerfile
+    container_name: trading_strategy
     environment:
       - DATABASE_URL=postgresql://trading_user:trading_pass@postgres:5432/trading_db
       - REDIS_URL=redis://redis:6379/0
@@ -67,128 +67,14 @@ services:
       redis:
         condition: service_healthy
     volumes:
-      - ./services/processing-service:/app
-      - ./shared:/app/shared
-    restart: unless-stopped
-
-  swing-engine:
-    build:
-      context: ./services/swing-engine
-      dockerfile: Dockerfile
-    container_name: trading_swing
-    environment:
-      - DATABASE_URL=postgresql://trading_user:trading_pass@postgres:5432/trading_db
-      - REDIS_URL=redis://redis:6379/0
-      - LOG_LEVEL=INFO
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    volumes:
-      - ./services/swing-engine:/app
-      - ./shared:/app/shared
-    restart: unless-stopped
-
-  sr-engine:
-    build:
-      context: ./services/sr-engine
-      dockerfile: Dockerfile
-    container_name: trading_sr
-    environment:
-      - DATABASE_URL=postgresql://trading_user:trading_pass@postgres:5432/trading_db
-      - REDIS_URL=redis://redis:6379/0
-      - LOG_LEVEL=INFO
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    volumes:
-      - ./services/sr-engine:/app
-      - ./shared:/app/shared
-    restart: unless-stopped
-
-  fib-entry-engine:
-    build:
-      context: ./services/fib-entry-engine
-      dockerfile: Dockerfile
-    container_name: trading_fib
-    environment:
-      - DATABASE_URL=postgresql://trading_user:trading_pass@postgres:5432/trading_db
-      - REDIS_URL=redis://redis:6379/0
-      - LOG_LEVEL=INFO
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    volumes:
-      - ./services/fib-entry-engine:/app
-      - ./shared:/app/shared
-    restart: unless-stopped
-
-  confluence-engine:
-    build:
-      context: ./services/confluence-engine
-      dockerfile: Dockerfile
-    container_name: trading_confluence
-    environment:
-      - DATABASE_URL=postgresql://trading_user:trading_pass@postgres:5432/trading_db
-      - REDIS_URL=redis://redis:6379/0
-      - LOG_LEVEL=INFO
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    volumes:
-      - ./services/confluence-engine:/app
-      - ./shared:/app/shared
-    restart: unless-stopped
-
-  risk-engine:
-    build:
-      context: ./services/risk-engine
-      dockerfile: Dockerfile
-    container_name: trading_risk
-    environment:
-      - DATABASE_URL=postgresql://trading_user:trading_pass@postgres:5432/trading_db
-      - REDIS_URL=redis://redis:6379/0
-      - LOG_LEVEL=INFO
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    volumes:
-      - ./services/risk-engine:/app
-      - ./shared:/app/shared
-    restart: unless-stopped
-
-  storage-service:
-    build:
-      context: ./services/storage-service
-      dockerfile: Dockerfile
-    container_name: trading_storage
-    environment:
-      - DATABASE_URL=postgresql://trading_user:trading_pass@postgres:5432/trading_db
-      - REDIS_URL=redis://redis:6379/0
-      - LOG_LEVEL=INFO
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    volumes:
-      - ./services/storage-service:/app
+      - ./services/strategy-engine:/app
       - ./shared:/app/shared
     restart: unless-stopped
 
   api-service:
     build:
-      context: ./services/api-service
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: services/api-service/Dockerfile
     container_name: trading_api
     ports:
       - "8000:8000"
@@ -208,8 +94,8 @@ services:
 
   worker-service:
     build:
-      context: ./services/worker-service
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: services/worker-service/Dockerfile
     container_name: trading_worker
     environment:
       - DATABASE_URL=postgresql://trading_user:trading_pass@postgres:5432/trading_db
