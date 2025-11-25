@@ -333,8 +333,32 @@ export default function DashboardPage() {
         
         setAllSignals(filteredSignals);
         
-        // Set the first signal (latest) as the current signal
-        if (filteredSignals.length > 0) {
+        // Check if there's a preset latestSignal that matches current symbol/timeframe
+        // This happens when navigating from the signals table
+        if (latestSignal && 
+            latestSignal.symbol === selectedSymbol && 
+            latestSignal.timeframe === selectedTimeframe) {
+          // Find the index of the preset signal in the filtered list
+          const presetIndex = filteredSignals.findIndex(
+            (s) => s.id === latestSignal.id || 
+                   (s.timestamp === latestSignal.timestamp && 
+                    s.entry1 === latestSignal.entry1)
+          );
+          
+          if (presetIndex >= 0) {
+            // Found the preset signal, use its index
+            setCurrentSignalIndex(presetIndex);
+            setLatestSignal(filteredSignals[presetIndex]);
+          } else if (filteredSignals.length > 0) {
+            // Preset signal not found, use first signal
+            setCurrentSignalIndex(0);
+            setLatestSignal(filteredSignals[0]);
+          } else {
+            setCurrentSignalIndex(0);
+            setLatestSignal(null);
+          }
+        } else if (filteredSignals.length > 0) {
+          // No preset signal, use first signal (latest) as default
           setCurrentSignalIndex(0);
           setLatestSignal(filteredSignals[0]);
         } else {
@@ -352,7 +376,7 @@ export default function DashboardPage() {
     };
 
     loadSignals();
-  }, [selectedSymbol, selectedTimeframe, setLatestSignal]);
+  }, [selectedSymbol, selectedTimeframe, setLatestSignal, latestSignal]);
 
   // Update displayed signal when index changes
   useEffect(() => {

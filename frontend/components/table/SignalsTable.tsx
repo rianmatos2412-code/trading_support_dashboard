@@ -6,7 +6,7 @@ import { ConfluenceBadges } from "@/components/ui/ConfluenceBadge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { formatPrice, formatTimestamp } from "@/lib/utils";
-import { TrendingUp, TrendingDown, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
+import { TrendingUp, TrendingDown, ArrowUpDown, ArrowUp, ArrowDown, ArrowRight } from "lucide-react";
 import { motion } from "framer-motion";
 import { useRouter } from "next/navigation";
 import { useMarketStore } from "@/stores/useMarketStore";
@@ -35,9 +35,9 @@ interface SignalsTableProps {
 
 export function SignalsTable({ signals, onRowClick }: SignalsTableProps) {
   const router = useRouter();
-  const { setSelectedSymbol, setLatestSignal } = useMarketStore();
-  const [sortField, setSortField] = useState<SortField>("timestamp");
-  const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
+  const { setSelectedSymbol, setSelectedTimeframe, setLatestSignal } = useMarketStore();
+  const [sortField, setSortField] = useState<SortField>("price_score");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
   
   // State to store current prices for each symbol (from WebSocket updates)
   const [symbolPrices, setSymbolPrices] = useState<Record<string, number>>({});
@@ -284,6 +284,7 @@ export function SignalsTable({ signals, onRowClick }: SignalsTableProps) {
                   <SortIcon field="timestamp" />
                 </Button>
               </th>
+              <th className="px-4 py-3 text-center">Action</th>
             </tr>
           </thead>
           <tbody>
@@ -299,7 +300,7 @@ export function SignalsTable({ signals, onRowClick }: SignalsTableProps) {
                     ${isHighScore ? "bg-emerald-500/10" : ""}
                     ${signal.direction === "long" ? "hover:bg-green-500/5" : "hover:bg-red-500/5"}
                   `}
-                  onClick={() => handleRowClick(signal)}
+                  // onClick={() => handleRowClick(signal)}
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: index * 0.02 }}
@@ -388,10 +389,28 @@ export function SignalsTable({ signals, onRowClick }: SignalsTableProps) {
                     {signal.tp3 ? formatPrice(signal.tp3) : "-"}
                   </td>
                   <td className="px-4 py-3 text-right">
-                    {signal.swing_high ? formatPrice(signal.swing_high) : "-"}
+                    {signal.swing_high ? (
+                      <div className="flex flex-col items-end gap-1">
+                        <span className="font-medium">{formatPrice(signal.swing_high)}</span>
+                        {signal.swing_high_timestamp && (
+                          <span className="text-xs text-muted-foreground">
+                            {formatTimestamp(signal.swing_high_timestamp)}
+                          </span>
+                        )}
+                      </div>
+                    ) : "-"}
                   </td>
                   <td className="px-4 py-3 text-right">
-                    {signal.swing_low ? formatPrice(signal.swing_low) : "-"}
+                    {signal.swing_low ? (
+                      <div className="flex flex-col items-end gap-1">
+                        <span className="font-medium">{formatPrice(signal.swing_low)}</span>
+                        {signal.swing_low_timestamp && (
+                          <span className="text-xs text-muted-foreground">
+                            {formatTimestamp(signal.swing_low_timestamp)}
+                          </span>
+                        )}
+                      </div>
+                    ) : "-"}
                   </td>
                   <td className="px-4 py-3">
                     {signal.confluence ? (
@@ -402,6 +421,27 @@ export function SignalsTable({ signals, onRowClick }: SignalsTableProps) {
                   </td>
                   <td className="px-4 py-3 text-sm text-muted-foreground">
                     {formatTimestamp(signal.timestamp)}
+                  </td>
+                  <td className="px-4 py-3 text-center">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={(e) => {
+                        e.stopPropagation(); // Prevent row click
+                        // Set symbol, timeframe, and signal
+                        setSelectedSymbol(signal.symbol as any);
+                        if (signal.timeframe) {
+                          setSelectedTimeframe(signal.timeframe as any);
+                        }
+                        setLatestSignal(signal);
+                        // Navigate to dashboard
+                        router.push("/dashboard");
+                      }}
+                      className="h-7 px-3"
+                      title="Go to dashboard with this signal"
+                    >
+                      <ArrowRight className="h-4 w-4" />
+                    </Button>
                   </td>
                 </motion.tr>
               );
