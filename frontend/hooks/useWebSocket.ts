@@ -48,6 +48,12 @@ export function useWebSocket(symbol?: string, timeframe?: string) {
       wsRef.current = null;
     }
 
+    // Only attempt connection in browser environment
+    if (typeof window === "undefined" || typeof WebSocket === "undefined") {
+      console.warn("WebSocket not available in this environment");
+      return;
+    }
+
     try {
       isConnectingRef.current = true;
       const ws = new WebSocket(WS_URL);
@@ -80,11 +86,11 @@ export function useWebSocket(symbol?: string, timeframe?: string) {
         try {
           const message = JSON.parse(event.data);
           if (message.type === "symbol_update") {
-            // if (message.data.symbol === "BTCUSDT") {
-            //   console.log("current time:", new Date().toISOString());
-            //   console.log("timestamp:", message.data.timestamp);
-            //   console.log("BTCUSDT price updated:", message.data.price);
-            // }
+            if (message.data.symbol === "BTCUSDT") {
+              console.log("current time:", new Date().toISOString());
+              console.log("timestamp:", message.data.timestamp);
+              console.log("BTCUSDT price updated:", message.data.price);
+            }
           }
           // console.log("WebSocket message received:", message);
           handleMessage(message);
@@ -95,9 +101,14 @@ export function useWebSocket(symbol?: string, timeframe?: string) {
 
       ws.onerror = (error) => {
         if (!isMountedRef.current) return;
-        console.error("WebSocket error:", error);
-        isConnectingRef.current = false;
-        setError("WebSocket connection error");
+        // Only log error if connection was actually attempted
+        // Suppress initial connection errors that might occur during page load
+        if (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN) {
+          console.error("WebSocket error:", error);
+          isConnectingRef.current = false;
+          // Don't set error state for initial connection failures - let reconnection handle it
+          // setError("WebSocket connection error");
+        }
       };
 
       ws.onclose = (event) => {
@@ -210,24 +221,46 @@ export function useWebSocket(symbol?: string, timeframe?: string) {
   }, []);
 
   useEffect(() => {
+    // Only run in browser
+    if (typeof window === "undefined") return;
+
     isMountedRef.current = true;
 
     // Disconnect previous connection
     disconnect();
 
-    // Small delay to ensure previous connection is fully closed
+    // Delay connection to ensure page is fully loaded and avoid initial load errors
     const connectTimeout = setTimeout(() => {
-      if (isMountedRef.current && WS_URL) {
-        connect();
+      if (isMountedRef.current && WS_URL && typeof WebSocket !== "undefined") {
+        try {
+          connect();
+        } catch (error) {
+          console.warn("WebSocket connection attempt failed:", error);
+          // Silently fail - reconnection logic will handle retries
+          // Don't set error state on initial connection failure
+          // The reconnection mechanism will handle retries
+          if (reconnectAttempts.current < maxReconnectAttempts) {
+            reconnectAttempts.current++;
+            reconnectTimeoutRef.current = setTimeout(() => {
+              if (isMountedRef.current) {
+                connect();
+              }
+            }, reconnectDelay.current);
+          }
+        }
       } else if (!WS_URL) {
         // Fallback to polling if WebSocket is not available
         console.log("WebSocket not configured, using REST API polling");
       }
-    }, 100);
+    }, 500); // Increased delay to allow page to fully load
 
     return () => {
       isMountedRef.current = false;
       clearTimeout(connectTimeout);
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
+      }
       disconnect();
     };
   }, [symbol, timeframe, selectedSymbol, selectedTimeframe, connect, disconnect]);

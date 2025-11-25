@@ -21,6 +21,7 @@ import {
   removeSymbolFilter,
   SymbolFilter,
 } from "@/lib/api";
+import { ErrorBoundary } from "@/components/error/ErrorBoundary";
 
 export default function SettingsPage() {
 

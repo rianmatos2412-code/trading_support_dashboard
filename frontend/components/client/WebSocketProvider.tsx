@@ -23,13 +23,9 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
   const signals = useMarketStore((state) => state.signals);
   const swingPoints = useMarketStore((state) => state.swingPoints);
 
-  // Auto-connect on mount
-  useEffect(() => {
-    connect();
-    return () => {
-      disconnect();
-    };
-  }, [connect, disconnect]);
+  // Note: useWebSocket already handles connection on mount/unmount
+  // We don't need to manually call connect/disconnect here
+  // The hook's useEffect will handle it based on symbol/timeframe changes
 
   return (
     <WebSocketContext.Provider value={{ connect, disconnect, candles, signals, swingPoints }}>

@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import { fetchSymbolsWithPrices } from "@/lib/api/server";
 import { SymbolsClient } from "./symbols-client";
 import { Card } from "@/components/ui/card";
+import { ErrorBoundary } from "@/components/error/ErrorBoundary";
 
 function SymbolsSkeleton() {
   return (
@@ -18,9 +19,11 @@ export default async function SymbolsPage() {
   const symbols = await fetchSymbolsWithPrices({ next: { revalidate: 30 } });
 
   return (
-    <Suspense fallback={<SymbolsSkeleton />}>
-      <SymbolsClient initialSymbols={symbols} />
-    </Suspense>
+    <ErrorBoundary>
+      <Suspense fallback={<SymbolsSkeleton />}>
+        <SymbolsClient initialSymbols={symbols} />
+      </Suspense>
+    </ErrorBoundary>
   );
 }
 

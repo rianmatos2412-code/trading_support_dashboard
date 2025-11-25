@@ -18,8 +18,9 @@ import { subscribeToSymbolUpdates } from "@/hooks/useSymbolData";
 import { TimeframeSelector } from "@/components/ui/TimeframeSelector";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
+import { ErrorBoundary } from "@/components/error/ErrorBoundary";
 
-export default function SymbolDetailPage() {
+function SymbolDetailContent() {
   const params = useParams();
   const router = useRouter();
   // Get symbol from URL and ensure it ends with USDT
@@ -491,6 +492,14 @@ export default function SymbolDetailPage() {
         </Card>
       </div>
     </div>
+  );
+}
+
+export default function SymbolDetailPage() {
+  return (
+    <ErrorBoundary>
+      <SymbolDetailContent />
+    </ErrorBoundary>
   );
 }
 

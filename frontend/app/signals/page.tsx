@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import { fetchSignals } from "@/lib/api/server";
 import { SignalsClient } from "./signals-client";
 import { Card } from "@/components/ui/card";
+import { ErrorBoundary } from "@/components/error/ErrorBoundary";
 
 interface SignalsPageProps {
   searchParams: {
@@ -35,9 +36,11 @@ export default async function SignalsPage({ searchParams }: SignalsPageProps) {
   );
 
   return (
-    <Suspense fallback={<SignalsSkeleton />}>
-      <SignalsClient initialSignals={signals} />
-    </Suspense>
+    <ErrorBoundary>
+      <Suspense fallback={<SignalsSkeleton />}>
+        <SignalsClient initialSignals={signals} />
+      </Suspense>
+    </ErrorBoundary>
   );
 }
 

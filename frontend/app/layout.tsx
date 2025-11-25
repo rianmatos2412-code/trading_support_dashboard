@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { Navigation } from "@/components/client/Navigation";
 import { WebSocketProvider } from "@/components/client/WebSocketProvider";
+import { ErrorBoundary } from "@/components/error/ErrorBoundary";
 
 const inter = Inter({ 
   subsets: ["latin"],
@@ -22,10 +23,14 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <body className={inter.className}>
-        <Navigation />
-        <WebSocketProvider>
-          {children}
-        </WebSocketProvider>
+        <ErrorBoundary>
+          <Navigation />
+          <WebSocketProvider>
+            <ErrorBoundary>
+              {children}
+            </ErrorBoundary>
+          </WebSocketProvider>
+        </ErrorBoundary>
       </body>
     </html>
   );
