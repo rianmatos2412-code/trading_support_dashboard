@@ -320,6 +320,11 @@ export default function DashboardPage() {
     loadData();
   }, [selectedSymbol, selectedTimeframe, setCandles, setLoading, setError]);
 
+  // Load swing points when symbol or timeframe changes
+  useEffect(() => {
+    refreshSwingPoints();
+  }, [selectedSymbol, selectedTimeframe, refreshSwingPoints]);
+
   // Fetch all signals for the selected symbol and timeframe
   useEffect(() => {
     const loadSignals = async () => {
