@@ -53,6 +53,7 @@ class StorageService:
         """Get strategy alerts with filters from database"""
         try:
             # Build query using raw SQL to join with symbols and timeframe tables
+            # Only show alerts for active symbols
             base_query = """
                 SELECT 
                     sa.id,
@@ -74,7 +75,7 @@ class StorageService:
                 FROM strategy_alerts sa
                 INNER JOIN symbols s ON sa.symbol_id = s.symbol_id
                 INNER JOIN timeframe t ON sa.timeframe_id = t.timeframe_id
-                WHERE 1=1
+                WHERE s.is_active = TRUE AND s.removed_at IS NULL
             """
             
             params = {}
@@ -129,6 +130,7 @@ class StorageService:
         """Get latest strategy alert for a symbol from database"""
         try:
             # Query using raw SQL to join with symbols and timeframe tables
+            # Only show alerts for active symbols
             base_query = """
                 SELECT 
                     sa.id,
@@ -151,6 +153,7 @@ class StorageService:
                 INNER JOIN symbols s ON sa.symbol_id = s.symbol_id
                 INNER JOIN timeframe t ON sa.timeframe_id = t.timeframe_id
                 WHERE s.symbol_name = :symbol
+                AND s.is_active = TRUE AND s.removed_at IS NULL
             """
             
             params = {"symbol": symbol}

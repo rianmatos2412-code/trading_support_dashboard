@@ -247,6 +247,76 @@ async def listen_for_config_changes(shutdown_event: asyncio.Event):
                     with DatabaseManager() as db:
                         new_symbols, reactivated_symbols = get_qualified_symbols(db)
                         
+                        # Update symbols table based on whitelist/blacklist status
+                        from database.repository import get_symbol_filters
+                        
+                        # Get current whitelist and blacklist
+                        filter_results = get_symbol_filters(db)
+                        whitelisted_symbols = set()
+                        blacklisted_symbols = set()
+                        
+                        for filter_item in filter_results:
+                            symbol = filter_item["symbol"]
+                            filter_type = filter_item["filter_type"]
+                            if filter_type == "whitelist":
+                                whitelisted_symbols.add(symbol)
+                            elif filter_type == "blacklist":
+                                blacklisted_symbols.add(symbol)
+                        
+                        # Update symbols table: activate whitelisted, deactivate blacklisted
+                        current_time = datetime.now(timezone.utc)
+                        
+                        # Activate whitelisted symbols (if they exist in symbols table)
+                        if whitelisted_symbols:
+                            result = db.execute(
+                                text("""
+                                    UPDATE symbols
+                                    SET is_active = TRUE,
+                                        removed_at = NULL,
+                                        updated_at = :updated_at
+                                    WHERE symbol_name = ANY(:whitelisted_symbols)
+                                    AND (is_active = FALSE OR removed_at IS NOT NULL)
+                                """),
+                                {
+                                    "updated_at": current_time,
+                                    "whitelisted_symbols": list(whitelisted_symbols)
+                                }
+                            )
+                            activated_count = result.rowcount
+                            if activated_count > 0:
+                                logger.info(
+                                    "whitelisted_symbols_activated",
+                                    count=activated_count,
+                                    symbols=list(whitelisted_symbols)[:10] if len(whitelisted_symbols) > 10 else list(whitelisted_symbols)
+                                )
+                        
+                        # Deactivate blacklisted symbols
+                        if blacklisted_symbols:
+                            result = db.execute(
+                                text("""
+                                    UPDATE symbols
+                                    SET is_active = FALSE,
+                                        removed_at = :removed_at,
+                                        updated_at = :updated_at
+                                    WHERE symbol_name = ANY(:blacklisted_symbols)
+                                    AND is_active = TRUE
+                                """),
+                                {
+                                    "removed_at": current_time,
+                                    "updated_at": current_time,
+                                    "blacklisted_symbols": list(blacklisted_symbols)
+                                }
+                            )
+                            deactivated_count = result.rowcount
+                            if deactivated_count > 0:
+                                logger.info(
+                                    "blacklisted_symbols_deactivated",
+                                    count=deactivated_count,
+                                    symbols=list(blacklisted_symbols)[:10] if len(blacklisted_symbols) > 10 else list(blacklisted_symbols)
+                                )
+                        
+                        db.commit()
+                        
                         async with symbols_lock:
                             global current_symbols
                             old_symbols = set(current_symbols)
