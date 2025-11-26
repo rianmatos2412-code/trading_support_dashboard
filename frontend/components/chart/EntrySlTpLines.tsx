@@ -18,10 +18,10 @@ interface EntrySlTpLinesProps {
 
 const COLORS = {
   entry: "#2563eb",
-  stopLoss: "#facc15",
+  stopLoss: "#ef4444",
   takeProfit: "#10b981",
-  swingHigh: "#a855f7",
-  swingLow: "#f97316",
+  swingHigh: "#ffffff",
+  swingLow: "#ffffff",
 };
 
 const toEpochSeconds = (timestamp?: string | number | null): number | null => {
