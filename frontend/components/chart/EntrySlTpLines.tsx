@@ -87,7 +87,7 @@ export function EntrySlTpLines({
     if (signal.tp2) {
       const tp2Series = chart.addLineSeries({
         color: "#10b981",
-        lineWidth: 1.5,
+        lineWidth: 1,
         lineStyle: 2,
       });
       tp2Series.setData([
