@@ -4,6 +4,7 @@ import os
 import asyncio
 from datetime import datetime, timezone
 from typing import List, Set, Optional, Dict, Tuple
+from decimal import Decimal
 from sqlalchemy import text
 import structlog
 import aiohttp
@@ -364,9 +365,15 @@ async def backfill_recent_candles(
                         }
                     )
         
-        # Update mismatched candles
-        if candles_to_update:
-            try:
+        # Update mismatched candles and insert missing candles in a single transaction
+        # Both operations must succeed or both must fail to maintain data consistency
+        # Track what was actually committed (not just attempted)
+        committed_inserts = 0
+        committed_updates = 0
+        
+        try:
+            # Update mismatched candles
+            if candles_to_update:
                 update_stmt = text("""
                     UPDATE ohlcv_candles
                     SET open = :open,
@@ -384,14 +391,12 @@ async def backfill_recent_candles(
                         "symbol_id": symbol_id,
                         "timeframe_id": timeframe_id,
                         "timestamp": candle.timestamp,
-                        "open": float(candle.open),
-                        "high": float(candle.high),
-                        "low": float(candle.low),
-                        "close": float(candle.close),
-                        "volume": float(candle.volume)
+                        "open": Decimal(str(candle.open)),
+                        "high": Decimal(str(candle.high)),
+                        "low": Decimal(str(candle.low)),
+                        "close": Decimal(str(candle.close)),
+                        "volume": Decimal(str(candle.volume))
                     })
-                
-                db.commit()
                 
                 logger.info(
                     "backfill_candles_updated",
@@ -401,54 +406,65 @@ async def backfill_recent_candles(
                     first_timestamp=candles_to_update[0].timestamp.isoformat() if candles_to_update else None,
                     last_timestamp=candles_to_update[-1].timestamp.isoformat() if candles_to_update else None
                 )
-            except Exception as e:
-                logger.error(
-                    "backfill_update_failed",
-                    symbol=cleaned_symbol,
-                    timeframe=timeframe,
-                    candles_count=len(candles_to_update),
-                    error=str(e),
-                    exc_info=True
-                )
-                db.rollback()
-        
-        logger.info(
-            "backfill_candles_checked",
-            symbol=cleaned_symbol,
-            timeframe=timeframe,
-            total_candles=len(candles),
-            existing_candles=len(existing_timestamps),
-            missing_candles=len(missing_candles),
-            candles_to_update=len(candles_to_update)
-        )
-        
-        # Insert missing candles
-        inserted_count = 0
-        if missing_candles:
-            try:
+            
+            logger.info(
+                "backfill_candles_checked",
+                symbol=cleaned_symbol,
+                timeframe=timeframe,
+                total_candles=len(candles),
+                existing_candles=len(existing_timestamps),
+                missing_candles=len(missing_candles),
+                candles_to_update=len(candles_to_update)
+            )
+            
+            # Insert missing candles
+            if missing_candles:
                 binance_service.save_candles(db, missing_candles)
-                inserted_count = len(missing_candles)
                 
                 logger.info(
                     "backfill_candles_inserted",
                     symbol=cleaned_symbol,
                     timeframe=timeframe,
-                    candles_inserted=inserted_count,
+                    candles_inserted=len(missing_candles),
                     first_timestamp=missing_candles[0].timestamp.isoformat() if missing_candles else None,
                     last_timestamp=missing_candles[-1].timestamp.isoformat() if missing_candles else None
                 )
-            except Exception as e:
-                logger.error(
-                    "backfill_insert_failed",
+            
+            # Commit all changes atomically (both UPDATE and INSERT)
+            # Only set committed counts after successful commit
+            if candles_to_update or missing_candles:
+                db.commit()
+                # Track what was actually committed
+                committed_updates = len(candles_to_update) if candles_to_update else 0
+                committed_inserts = len(missing_candles) if missing_candles else 0
+                
+                logger.debug(
+                    "backfill_transaction_committed",
                     symbol=cleaned_symbol,
                     timeframe=timeframe,
-                    candles_count=len(missing_candles),
-                    error=str(e),
-                    exc_info=True
+                    updates=committed_updates,
+                    inserts=committed_inserts
                 )
+                
+        except Exception as e:
+            # Rollback all changes if any operation fails
+            logger.error(
+                "backfill_transaction_failed",
+                symbol=cleaned_symbol,
+                timeframe=timeframe,
+                candles_to_update=len(candles_to_update) if candles_to_update else 0,
+                missing_candles=len(missing_candles) if missing_candles else 0,
+                error=str(e),
+                exc_info=True
+            )
+            db.rollback()
+            # Ensure counts remain 0 - nothing was committed
+            committed_inserts = 0
+            committed_updates = 0
         
         # Return total count of candles processed (inserted + updated)
-        total_processed = inserted_count + len(candles_to_update)
+        # Only count operations that were successfully committed
+        total_processed = committed_inserts + committed_updates
         
         if total_processed == 0:
             logger.debug(
