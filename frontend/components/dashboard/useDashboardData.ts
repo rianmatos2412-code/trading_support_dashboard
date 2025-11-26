@@ -5,11 +5,9 @@ import { useMarketStore } from "@/stores/useMarketStore";
 import {
   fetchCandles,
   fetchMarketMetadata,
-  fetchAlertsForSwings,
   fetchSignals,
   TradingSignal,
 } from "@/lib/api";
-import { SwingPoint } from "@/lib/api";
 import { Timeframe } from "@/lib/types";
 
 export function useDashboardData() {
@@ -20,7 +18,6 @@ export function useDashboardData() {
     availableTimeframes,
     symbolTimeframes,
     setCandles,
-    setSwingPoints,
     setLatestSignal,
     setMarketMetadata,
     setSelectedSymbol,
@@ -29,66 +26,11 @@ export function useDashboardData() {
     setError,
   } = useMarketStore();
 
-  const [isRefreshingSwings, setIsRefreshingSwings] = useState(false);
   const [allSignals, setAllSignals] = useState<TradingSignal[]>([]);
   const [currentSignalIndex, setCurrentSignalIndex] = useState<number>(0);
   const [isLoadingSignals, setIsLoadingSignals] = useState(false);
 
-  // Refresh swing points
-  const refreshSwingPoints = useCallback(async () => {
-    setIsRefreshingSwings(true);
-    try {
-      const alerts = await fetchAlertsForSwings(selectedSymbol, selectedTimeframe, 100);
-      const swingPointsMap = new Map<string, SwingPoint>();
-
-      alerts.forEach((alert) => {
-        if (alert.swing_high && alert.swing_high_timestamp) {
-          const key = `${alert.symbol}_${alert.timeframe}_high_${alert.swing_high_timestamp}_${alert.swing_high}`;
-          if (!swingPointsMap.has(key)) {
-            swingPointsMap.set(key, {
-              id: Date.now() + swingPointsMap.size,
-              symbol: alert.symbol,
-              timeframe: alert.timeframe || selectedTimeframe,
-              type: "high",
-              price: alert.swing_high,
-              timestamp: alert.swing_high_timestamp,
-            });
-          }
-        }
-        if (alert.swing_low && alert.swing_low_timestamp) {
-          const key = `${alert.symbol}_${alert.timeframe}_low_${alert.swing_low_timestamp}_${alert.swing_low}`;
-          if (!swingPointsMap.has(key)) {
-            swingPointsMap.set(key, {
-              id: Date.now() + swingPointsMap.size + 1000,
-              symbol: alert.symbol,
-              timeframe: alert.timeframe || selectedTimeframe,
-              type: "low",
-              price: alert.swing_low,
-              timestamp: alert.swing_low_timestamp,
-            });
-          }
-        }
-      });
-
-      const uniqueSwingPoints = Array.from(swingPointsMap.values()).sort(
-        (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-      );
-
-      setSwingPoints(uniqueSwingPoints);
-
-      if (alerts.length > 0) {
-        const sortedAlerts = [...alerts].sort(
-          (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-        );
-        setLatestSignal(sortedAlerts[0]);
-      }
-    } catch (error) {
-      console.error("Error refreshing swing points:", error);
-      setError("Failed to refresh swing points");
-    } finally {
-      setIsRefreshingSwings(false);
-    }
-  }, [selectedSymbol, selectedTimeframe, setSwingPoints, setLatestSignal, setError]);
+  // Swing points are now calculated client-side from candles (see useClientSwingDetection hook)
 
   // Load metadata
   const loadMetadata = useCallback(async () => {
@@ -118,11 +60,6 @@ export function useDashboardData() {
 
     loadData();
   }, [selectedSymbol, selectedTimeframe, setCandles, setLoading, setError]);
-
-  // Load swing points
-  useEffect(() => {
-    refreshSwingPoints();
-  }, [selectedSymbol, selectedTimeframe, refreshSwingPoints]);
 
   // Load metadata
   useEffect(() => {
@@ -283,8 +220,6 @@ export function useDashboardData() {
   }, []);
 
   return {
-    refreshSwingPoints,
-    isRefreshingSwings,
     allSignals,
     currentSignalIndex,
     isLoadingSignals,

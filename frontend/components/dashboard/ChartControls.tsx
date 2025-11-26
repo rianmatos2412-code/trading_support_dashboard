@@ -2,17 +2,11 @@
 
 import { useMarketStore } from "@/stores/useMarketStore";
 import { TimeframeSelector } from "@/components/ui/TimeframeSelector";
-import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { RefreshCw } from "lucide-react";
 
-interface ChartControlsProps {
-  onRefreshSwings: () => void;
-  isRefreshingSwings: boolean;
-}
-
-export function ChartControls({ onRefreshSwings, isRefreshingSwings }: ChartControlsProps) {
+// Swings are now auto-calculated from candles, no refresh button needed
+export function ChartControls() {
   const { chartSettings, updateChartSettings } = useMarketStore();
 
   return (
@@ -108,16 +102,6 @@ export function ChartControls({ onRefreshSwings, isRefreshingSwings }: ChartCont
             MA(99)
           </Label>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={onRefreshSwings}
-          disabled={isRefreshingSwings}
-          className="flex items-center gap-2"
-        >
-          <RefreshCw className={`h-4 w-4 ${isRefreshingSwings ? "animate-spin" : ""}`} />
-          Refresh Swings
-        </Button>
       </div>
     </div>
   );

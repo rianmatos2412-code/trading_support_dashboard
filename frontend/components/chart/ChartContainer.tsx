@@ -15,7 +15,6 @@ import { Candle, fetchCandles } from "@/lib/api";
 import { SwingMarkers } from "./SwingMarkers";
 import { FibonacciOverlay } from "./FibonacciOverlay";
 import { OrderBlockOverlay } from "./OrderBlockOverlay";
-import { SupportResistanceLines } from "./SupportResistanceLines";
 import { EntrySlTpLines } from "./EntrySlTpLines";
 import { RSIIndicator } from "./RSIIndicator";
 import { CandleTooltip } from "./CandleTooltip";
@@ -47,7 +46,6 @@ export function ChartContainer({
     selectedSymbol,
     selectedTimeframe,
     swingPoints,
-    srLevels,
     latestSignal,
     chartSettings,
     setCandles,
@@ -638,11 +636,6 @@ export function ChartContainer({
         (s) => s.symbol === selectedSymbol && s.timeframe === selectedTimeframe
       )
     : [];
-  const currentSR = Array.isArray(srLevels)
-    ? srLevels.filter(
-        (s) => s.symbol === selectedSymbol && s.timeframe === selectedTimeframe
-      )
-    : [];
 
   const chartApi = isChartReady ? chartRef.current : null;
   const priceSeries = isChartReady ? seriesRef.current : null;
@@ -662,8 +655,6 @@ export function ChartContainer({
           )}
         />
       )}
-      
-      {/* Hide Fibs, OB, S/R - removed from display */}
       
       {/* Show Entry/SL/TP lines based on chart settings */}
       {chartSettings.showEntrySLTP && latestSignal && (

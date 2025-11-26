@@ -15,6 +15,7 @@ import { ChartHeader } from "@/components/dashboard/ChartHeader";
 import { SignalInfoPanel } from "@/components/dashboard/SignalInfoPanel";
 import { useDashboardData } from "@/components/dashboard/useDashboardData";
 import { ErrorBoundary } from "@/components/error/ErrorBoundary";
+import { useClientSwingDetection } from "@/hooks/useClientSwingDetection";
 
 function DashboardSkeleton() {
   return (
@@ -45,9 +46,10 @@ function DashboardContent() {
   const entryPrice = latestSignal?.entry1 || latestSignal?.price || null;
   const marketScore = latestSignal?.market_score || 0;
 
+  // Use client-side swing detection (calculates from candles, not signals)
+  useClientSwingDetection();
+
   const {
-    refreshSwingPoints,
-    isRefreshingSwings,
     allSignals,
     currentSignalIndex,
     isLoadingSignals,
@@ -96,10 +98,7 @@ function DashboardContent() {
           </div>
 
           {/* Controls Bar */}
-          <ChartControls
-            onRefreshSwings={refreshSwingPoints}
-            isRefreshingSwings={isRefreshingSwings}
-          />
+          <ChartControls />
 
           {/* Main Content Grid */}
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">

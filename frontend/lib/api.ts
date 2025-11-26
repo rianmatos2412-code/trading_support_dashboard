@@ -30,6 +30,7 @@ export interface SRLevel {
   type: "support" | "resistance";
   strength: number;
   touches: number;
+  timestamp?: string; // Timestamp of the candle where this level was detected
 }
 
 export interface TradingSignal {
