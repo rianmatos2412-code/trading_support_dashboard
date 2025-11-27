@@ -1,4 +1,4 @@
-import { create } from "zustand";
+import { createWithEqualityFn } from "zustand/traditional";
 import { persist } from "zustand/middleware";
 import { Settings, DEFAULT_SETTINGS } from "@/lib/types";
 
@@ -9,7 +9,7 @@ interface SettingsState {
   saveSettings: () => Promise<void>;
 }
 
-export const useSettingsStore = create<SettingsState>()(
+export const useSettingsStore = createWithEqualityFn<SettingsState>()(
   persist(
     (set, get) => ({
       settings: DEFAULT_SETTINGS,

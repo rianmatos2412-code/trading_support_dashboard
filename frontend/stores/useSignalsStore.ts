@@ -1,6 +1,6 @@
 "use client";
 
-import { create } from "zustand";
+import { createWithEqualityFn } from "zustand/traditional";
 import { TradingSignal } from "@/lib/api";
 
 type SignalMap = Record<string, TradingSignal>;
@@ -36,7 +36,7 @@ const shouldUpdateSignal = (current: TradingSignal | undefined, next: TradingSig
   return false;
 };
 
-export const useSignalsStore = create<SignalStoreState>()((set, get) => ({
+export const useSignalsStore = createWithEqualityFn<SignalStoreState>()((set, get) => ({
   signalMap: {},
   signalIds: [],
   revision: 0,

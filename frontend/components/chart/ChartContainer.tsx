@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import {
   CandlestickSeries,
   ColorType,
@@ -15,6 +15,7 @@ import {
   AreaSeries,
 } from "lightweight-charts";
 import { useMarketStore } from "@/stores/useMarketStore";
+import { shallow } from "zustand/shallow";
 import { Candle, fetchCandles } from "@/lib/api";
 import { SwingMarkers } from "./SwingMarkers";
 import { FibonacciOverlay } from "./FibonacciOverlay";
@@ -60,11 +61,38 @@ export function ChartContainer({
     selectedSymbol,
     selectedTimeframe,
     swingPoints,
-    srLevels,
     latestSignal,
     chartSettings,
     setCandles,
-  } = useMarketStore();
+  } = useMarketStore(
+    (state) => ({
+      candles: state.candles,
+      selectedSymbol: state.selectedSymbol,
+      selectedTimeframe: state.selectedTimeframe,
+      swingPoints: state.swingPoints,
+      latestSignal: state.latestSignal,
+      chartSettings: state.chartSettings,
+      setCandles: state.setCandles,
+    }),
+    shallow
+  );
+
+  const currentCandles = useMemo(() => {
+    if (!Array.isArray(candles)) return [];
+    return candles.filter(
+      (c) => c.symbol === selectedSymbol && c.timeframe === selectedTimeframe
+    );
+  }, [candles, selectedSymbol, selectedTimeframe]);
+
+  const currentSwings = useMemo(
+    () =>
+      Array.isArray(swingPoints)
+        ? swingPoints.filter(
+            (s) => s.symbol === selectedSymbol && s.timeframe === selectedTimeframe
+          )
+        : [],
+    [swingPoints, selectedSymbol, selectedTimeframe]
+  );
 
   // Initialize chart once
   useEffect(() => {
@@ -389,13 +417,13 @@ export function ChartContainer({
 
         if (newCandles.length > 0) {
           // Get current candles from the store state
-          const currentCandles = useMarketStore.getState().candles;
+          const storeCandles = useMarketStore.getState().candles;
           
           // Separate candles for current symbol/timeframe and others
-          const otherCandles = currentCandles.filter(
+          const otherCandles = storeCandles.filter(
             (c) => !(c.symbol === selectedSymbol && c.timeframe === selectedTimeframe)
           );
-          const filteredExisting = currentCandles.filter(
+          const filteredExisting = storeCandles.filter(
             (c) => c.symbol === selectedSymbol && c.timeframe === selectedTimeframe
           );
 
@@ -407,11 +435,9 @@ export function ChartContainer({
             candleMap.set(candle.timestamp, candle);
           });
 
-          // Add new candles (they will overwrite if duplicate, but new ones should be older)
+          // Add new candles (overwrite duplicates to ensure freshest data)
           newCandles.forEach((candle) => {
-            if (!candleMap.has(candle.timestamp)) {
-              candleMap.set(candle.timestamp, candle);
-            }
+            candleMap.set(candle.timestamp, candle);
           });
 
           // Convert back to array and sort by timestamp
@@ -539,16 +565,15 @@ export function ChartContainer({
       return;
     }
 
-    const filteredCandles = candles.filter(
-      (c) => c.symbol === selectedSymbol && c.timeframe === selectedTimeframe
-    );
+    const filteredCandles = currentCandles;
     
-    // If no candles match, return early
-    if (!filteredCandles.length) return;
+    // If no candles match, clear previous reference and exit
+    if (!filteredCandles.length) {
+      prevCandlesRef.current = [];
+      return;
+    }
 
-    const prevFiltered = prevCandlesRef.current.filter(
-      (c) => c.symbol === selectedSymbol && c.timeframe === selectedTimeframe
-    );
+    const prevFiltered = prevCandlesRef.current;
 
     // Check if this is initial load or symbol/timeframe changed
     const isInitialLoad = prevFiltered.length === 0;
@@ -781,26 +806,14 @@ export function ChartContainer({
     }
 
     // Update previous candles reference
-    prevCandlesRef.current = candles;
-  }, [candles, selectedSymbol, selectedTimeframe, oldestLoadedTime]);
+    prevCandlesRef.current = filteredCandles;
+  }, [currentCandles, oldestLoadedTime]);
 
   // Reset oldest loaded time and previous candles when symbol or timeframe changes
   useEffect(() => {
     setOldestLoadedTime(null);
     prevCandlesRef.current = [];
   }, [selectedSymbol, selectedTimeframe]);
-
-  // Render overlays - ensure arrays are always arrays
-  const currentSwings = Array.isArray(swingPoints)
-    ? swingPoints.filter(
-        (s) => s.symbol === selectedSymbol && s.timeframe === selectedTimeframe
-      )
-    : [];
-  const currentSR = Array.isArray(srLevels)
-    ? srLevels.filter(
-        (s) => s.symbol === selectedSymbol && s.timeframe === selectedTimeframe
-      )
-    : [];
 
   const chartApi = isChartReady ? chartRef.current : null;
   const priceSeries = isChartReady ? seriesRef.current : null;
@@ -827,9 +840,7 @@ export function ChartContainer({
           chart={chartApi}
           series={priceSeries}
           swings={currentSwings}
-          candles={candles.filter(
-            (c) => c.symbol === selectedSymbol && c.timeframe === selectedTimeframe
-          )}
+          candles={currentCandles}
         />
       )}
       
@@ -849,7 +860,7 @@ export function ChartContainer({
         <RSIIndicator
           chart={chartApi}
           pane={rsiPaneState}
-          candles={candles}
+          candles={currentCandles}
           selectedSymbol={selectedSymbol}
           selectedTimeframe={selectedTimeframe}
           period={14}
@@ -862,7 +873,7 @@ export function ChartContainer({
         <CandleTooltip
           chart={chartApi}
           chartContainer={chartContainerRef.current}
-          candles={candles}
+          candles={currentCandles}
           selectedSymbol={selectedSymbol}
           selectedTimeframe={selectedTimeframe}
         />
@@ -871,7 +882,7 @@ export function ChartContainer({
       {/* Moving Averages */}
       <MovingAverages
         chart={chartApi}
-        candles={candles}
+        candles={currentCandles}
         selectedSymbol={selectedSymbol}
         selectedTimeframe={selectedTimeframe}
         showMA7={chartSettings.showMA7}
@@ -896,7 +907,7 @@ export function ChartContainer({
             key={indicator.id}
             chart={chartApi}
             pane={pane}
-            candles={candles}
+            candles={currentCandles}
             selectedSymbol={selectedSymbol}
             selectedTimeframe={selectedTimeframe}
             indicator={indicator}

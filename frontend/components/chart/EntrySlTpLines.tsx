@@ -91,7 +91,7 @@ export function EntrySlTpLines({
         typeof visibleRange.from === "number" ? visibleRange.from : nowSec - 86400;
       const fromTimestamp =
         swingTimestamps.length > 0
-          ? Math.min(...swingTimestamps) // Oldest swing timestamp anchors our overlays
+          ? Math.min(...swingTimestamps)
           : fallbackFrom;
       const toTimestamp =
         typeof visibleRange.to === "number" ? visibleRange.to : nowSec;
@@ -99,13 +99,13 @@ export function EntrySlTpLines({
       const rangeStart = fromTimestamp as Time;
       const extendedRangeEnd = (toTimestamp + 86400) as Time;
 
-      // Calculate swing line time range: from min to max of swing timestamps
-      const swingTimeRange = swingTimestamps.length === 2
-        ? {
-            start: Math.min(swingHighSeconds!, swingLowSeconds!) as Time,
-            end: Math.max(swingHighSeconds!, swingLowSeconds!) as Time,
-          }
-        : null;
+      const swingTimeRange =
+        swingTimestamps.length === 2
+          ? {
+              start: Math.min(swingHighSeconds!, swingLowSeconds!) as Time,
+              end: Math.max(swingHighSeconds!, swingLowSeconds!) as Time,
+            }
+          : null;
 
       const addHorizontalLine = (
         value: number | null | undefined,
@@ -135,7 +135,6 @@ export function EntrySlTpLines({
           crosshairMarkerVisible: false,
         });
 
-        // Use custom time range if provided, otherwise use default range
         const startTime = timeRange ? timeRange.start : rangeStart;
         const endTime = timeRange ? timeRange.end : extendedRangeEnd;
 
@@ -147,7 +146,9 @@ export function EntrySlTpLines({
         seriesRef.current.push(lineSeries);
       };
 
-      addHorizontalLine(signal.entry1, {
+      const entryPrice = signal.entry1 ?? signal.price;
+
+      addHorizontalLine(entryPrice, {
         color: COLORS.entry,
         lineWidth: 2,
         lineStyle: LineStyle.Solid,
@@ -177,7 +178,6 @@ export function EntrySlTpLines({
         title: "TP 3",
       });
 
-      // Swing high and low lines only between their timestamps
       if (swingTimeRange && signal.swing_high != null) {
         addHorizontalLine(signal.swing_high, {
           color: COLORS.swingHigh,

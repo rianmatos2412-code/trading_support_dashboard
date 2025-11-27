@@ -1,4 +1,4 @@
-import { create } from "zustand";
+import { createWithEqualityFn } from "zustand/traditional";
 import { Candle, SwingPoint, SRLevel, TradingSignal, MarketMetadata } from "@/lib/api";
 import {
   Timeframe,
@@ -63,7 +63,7 @@ const defaultChartSettings: ChartSettings = {
   activeIndicators: [], // Dynamic list of active indicators
 };
 
-export const useMarketStore = create<MarketState>((set) => ({
+export const useMarketStore = createWithEqualityFn<MarketState>((set) => ({
   selectedSymbol: "BTCUSDT",
   selectedTimeframe: "30m",
   availableSymbols: DEFAULT_SYMBOLS,
