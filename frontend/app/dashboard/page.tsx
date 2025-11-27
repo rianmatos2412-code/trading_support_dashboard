@@ -39,7 +39,14 @@ const MemoizedSignalInfoPanel = memo(SignalInfoPanel);
 const MemoizedChartHeader = memo(ChartHeader);
 
 // Isolated component for the chart section - subscribes only to what it needs
-function ChartSection() {
+type DashboardData = ReturnType<typeof useDashboardData>;
+type SymbolDataState = ReturnType<typeof useSymbolData>;
+
+interface ChartSectionProps {
+  dashboardData: DashboardData;
+}
+
+function ChartSection({ dashboardData }: ChartSectionProps) {
   const selectedSymbol = useMarketStore((state) => state.selectedSymbol);
   const selectedTimeframe = useMarketStore((state) => state.selectedTimeframe);
   const latestSignal = useMarketStore((state) => state.latestSignal);
@@ -50,7 +57,7 @@ function ChartSection() {
     isLoadingSignals,
     handlePreviousSignal,
     handleNextSignal,
-  } = useDashboardData();
+  } = dashboardData;
 
   return (
     <div className="lg:col-span-3 flex flex-col min-h-0">
@@ -82,11 +89,16 @@ function ChartSection() {
 }
 
 // Isolated component for the signal info panel - subscribes only to what it needs
-function SignalInfoSection() {
+interface SignalInfoSectionProps {
+  dashboardData: DashboardData;
+  symbolDataState: SymbolDataState;
+}
+
+function SignalInfoSection({ dashboardData, symbolDataState }: SignalInfoSectionProps) {
   const latestSignal = useMarketStore((state) => state.latestSignal);
   const selectedSymbol = useMarketStore((state) => state.selectedSymbol);
   
-  const { symbols } = useSymbolData();
+  const { symbols } = symbolDataState;
   
   // Memoize symbolData array conversion
   const symbolData = useMemo(
@@ -105,7 +117,7 @@ function SignalInfoSection() {
     [currentSymbolData]
   );
   
-  const { allSignals, currentSignalIndex } = useDashboardData();
+  const { allSignals, currentSignalIndex } = dashboardData;
   
   const entryPrice = useMemo(
     () => latestSignal?.entry1 || latestSignal?.price || null,
@@ -130,8 +142,12 @@ function SignalInfoSection() {
 }
 
 // Isolated component for the sidebar - only re-renders when symbols change
-function SymbolSidebar() {
-  const { symbols } = useSymbolData();
+interface SymbolSidebarProps {
+  symbolDataState: SymbolDataState;
+}
+
+function SymbolSidebar({ symbolDataState }: SymbolSidebarProps) {
+  const { symbols } = symbolDataState;
   
   // Memoize symbolData array conversion
   const symbolData = useMemo(
@@ -161,15 +177,14 @@ function SymbolSidebar() {
 
 // Main dashboard content - minimal subscriptions
 function DashboardContent() {
-  const {
-    refreshSwingPoints,
-    isRefreshingSwings,
-  } = useDashboardData();
+  const dashboardData = useDashboardData();
+  const symbolDataState = useSymbolData();
+  const { refreshSwingPoints, isRefreshingSwings } = dashboardData;
 
   return (
     <div className="flex h-screen bg-background overflow-hidden">
       {/* Symbol Manager Sidebar */}
-      <SymbolSidebar />
+      <SymbolSidebar symbolDataState={symbolDataState} />
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
@@ -211,10 +226,13 @@ function DashboardContent() {
           <div className="max-w-[1920px] mx-auto h-full">
             <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 h-full">
               {/* Main Chart Panel */}
-              <ChartSection />
+            <ChartSection dashboardData={dashboardData} />
 
               {/* Sidebar */}
-              <SignalInfoSection />
+            <SignalInfoSection
+              dashboardData={dashboardData}
+              symbolDataState={symbolDataState}
+            />
             </div>
           </div>
         </div>
