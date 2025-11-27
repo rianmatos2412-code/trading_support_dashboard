@@ -163,6 +163,7 @@ export function useDashboardData() {
         currentLatestSignal.symbol === selectedSymbol && 
         currentLatestSignal.timeframe === selectedTimeframe;
 
+
       // Only overwrite if there's no preset signal and no existing signal
       if (!hasPresetSignal && !hasExistingSignal && alerts.length > 0) {
         const sortedAlerts = [...alerts].sort(
@@ -264,9 +265,8 @@ export function useDashboardData() {
             (s) => {
               if (s.id && presetSignal!.id && s.id === presetSignal!.id) return true;
               if (s.timestamp === presetSignal!.timestamp && 
-                  (s.entry1 || s.price) === (presetSignal!.entry1 || presetSignal!.price)) return true;
-              if (s.timestamp === presetSignal!.timestamp && 
-                  s.symbol === presetSignal!.symbol) return true;
+                  (s.entry1 || s.price) === (presetSignal!.entry1 || presetSignal!.price) && 
+                s.swing_high === presetSignal!.swing_high && s.swing_low === presetSignal!.swing_low) return true;
               return false;
             }
           );
