@@ -14,7 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ArrowLeft, Filter, Search, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
+import { ArrowLeft, Filter, Search, ArrowUpDown, ArrowUp, ArrowDown, Lock, Unlock } from "lucide-react";
 import { SignalList } from "@/components/signals/SignalList";
 import { useSignalsStore } from "@/stores/useSignalsStore";
 import { useSignalFeed } from "@/hooks/useSignalFeed";
@@ -58,6 +58,8 @@ export function SignalsClient({ initialSignals }: SignalsClientProps) {
   const [maxPrice, setMaxPrice] = useState<number>(0);
   const [sortField, setSortField] = useState<SortField>("score");
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
+  const [isFixed, setIsFixed] = useState(false);
+  const [fixedOrder, setFixedOrder] = useState<string[]>([]);
   const setInitialSignals = useSignalsStore((state) => state.setInitialSignals);
   const signalIds = useSignalsStore((state) => state.signalIds);
   const revision = useSignalsStore((state) => state.revision);
@@ -80,6 +82,81 @@ export function SignalsClient({ initialSignals }: SignalsClientProps) {
       if (directionFilter !== "all" && signal.direction !== directionFilter) return false;
       
       // Filter by current price range
+      const currentPrice = symbols.find((s) => s.symbol === signal.symbol)?.price ?? signal.price ?? 0;
+      if (minPrice > 0 && currentPrice < minPrice) return false;
+      if (maxPrice > 0 && currentPrice > maxPrice) return false;
+      
+      return true;
+    });
+
+    // If fixed, maintain the fixed order for filtered items
+    if (isFixed && fixedOrder.length > 0) {
+      // Create a set for fast lookup of filtered items
+      const filteredSet = new Set(filtered);
+      // Return items in fixed order that are still in the filtered set
+      return fixedOrder.filter(id => filteredSet.has(id));
+    }
+
+    // Sort signals
+    const sorted = [...filtered].sort((aId, bId) => {
+      const a = lookup[aId];
+      const b = lookup[bId];
+      if (!a || !b) return 0;
+
+      let aValue: number | string;
+      let bValue: number | string;
+
+      switch (sortField) {
+        case "name":
+          aValue = a.symbol.toLowerCase();
+          bValue = b.symbol.toLowerCase();
+          break;
+        case "price": {
+          const aPrice = symbols.find((s) => s.symbol === a.symbol)?.price ?? a.price ?? 0;
+          const bPrice = symbols.find((s) => s.symbol === b.symbol)?.price ?? b.price ?? 0;
+          aValue = aPrice;
+          bValue = bPrice;
+          break;
+        }
+        case "score": {
+          const aEntryPrice = a.entry1 ?? a.price ?? 0;
+          const bEntryPrice = b.entry1 ?? b.price ?? 0;
+          const aCurrentPrice = symbols.find((s) => s.symbol === a.symbol)?.price ?? null;
+          const bCurrentPrice = symbols.find((s) => s.symbol === b.symbol)?.price ?? null;
+          aValue = calculatePriceScore(aCurrentPrice, aEntryPrice);
+          bValue = calculatePriceScore(bCurrentPrice, bEntryPrice);
+          break;
+        }
+        default:
+          return 0;
+      }
+
+      if (typeof aValue === "string" && typeof bValue === "string") {
+        const comparison = aValue.localeCompare(bValue);
+        return sortDirection === "asc" ? comparison : -comparison;
+      }
+
+      const comparison = (aValue as number) - (bValue as number);
+      return sortDirection === "asc" ? comparison : -comparison;
+    });
+
+    return sorted;
+  }, [signalIds, searchTerm, directionFilter, minPrice, maxPrice, revision, sortField, sortDirection, symbols, isFixed, fixedOrder]);
+
+  const totalSignals = signalIds.length;
+
+  // Calculate current order for fixing
+  const calculateCurrentOrder = useMemo(() => {
+    const lookup = useSignalsStore.getState().signalMap;
+    const query = searchTerm.trim().toLowerCase();
+
+    // Filter signals
+    const filtered = signalIds.filter((id) => {
+      const signal = lookup[id];
+      if (!signal) return false;
+      if (query && !signal.symbol.toLowerCase().includes(query)) return false;
+      if (directionFilter !== "all" && signal.direction !== directionFilter) return false;
+      
       const currentPrice = symbols.find((s) => s.symbol === signal.symbol)?.price ?? signal.price ?? 0;
       if (minPrice > 0 && currentPrice < minPrice) return false;
       if (maxPrice > 0 && currentPrice > maxPrice) return false;
@@ -131,9 +208,19 @@ export function SignalsClient({ initialSignals }: SignalsClientProps) {
     });
 
     return sorted;
-  }, [signalIds, searchTerm, directionFilter, minPrice, maxPrice, revision, sortField, sortDirection, symbols]);
+  }, [signalIds, searchTerm, directionFilter, minPrice, maxPrice, sortField, sortDirection, symbols]);
 
-  const totalSignals = signalIds.length;
+  // Handle fixed button toggle
+  const handleFixedToggle = () => {
+    if (!isFixed) {
+      // When enabling fixed, capture the current order
+      setFixedOrder(calculateCurrentOrder);
+    } else {
+      // When disabling fixed, clear the fixed order
+      setFixedOrder([]);
+    }
+    setIsFixed(!isFixed);
+  };
 
   return (
     <div className="min-h-screen bg-background p-4 md:p-6">
@@ -235,6 +322,7 @@ export function SignalsClient({ initialSignals }: SignalsClientProps) {
               <Select
                 value={sortField}
                 onValueChange={(value) => setSortField(value as SortField)}
+                disabled={isFixed}
               >
                 <SelectTrigger className="w-[140px]">
                   <SelectValue />
@@ -252,6 +340,7 @@ export function SignalsClient({ initialSignals }: SignalsClientProps) {
               <Select
                 value={sortDirection}
                 onValueChange={(value) => setSortDirection(value as SortDirection)}
+                disabled={isFixed}
               >
                 <SelectTrigger className="w-[100px]">
                   <div className="flex items-center gap-2">
@@ -278,6 +367,27 @@ export function SignalsClient({ initialSignals }: SignalsClientProps) {
                   </SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Button
+                variant={isFixed ? "default" : "outline"}
+                size="sm"
+                onClick={handleFixedToggle}
+                className="gap-2"
+              >
+                {isFixed ? (
+                  <>
+                    <Lock className="h-4 w-4" />
+                    <span>Fixed</span>
+                  </>
+                ) : (
+                  <>
+                    <Unlock className="h-4 w-4" />
+                    <span>Unfixed</span>
+                  </>
+                )}
+              </Button>
             </div>
           </div>
         </Card>

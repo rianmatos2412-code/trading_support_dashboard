@@ -16,7 +16,7 @@ interface SignalRowProps {
 }
 
 const calculatePriceScore = (currentPrice: number | null | undefined, entryPrice: number): number => {
-  if (!currentPrice || currentPrice <= 0 || entryPrice <= 0) return 0;
+  if (!currentPrice || currentPrice <= 0 || entryPrice <= 0) return Infinity; // Missing prices should be treated as invalid
   const score = Math.abs(currentPrice - entryPrice) / currentPrice;
   return score * 100; // Convert to percentage
 };
@@ -43,6 +43,8 @@ export const SignalRow = memo(
 
     const scoreStyles = useMemo(() => {
       // Score is now a percentage (0-100+), lower is better (closer to entry)
+      // Handle invalid/missing prices
+      if (!isFinite(score)) return "text-muted-foreground";
       if (score <= 1) return "text-emerald-400"; // Within 1% of entry
       if (score <= 3) return "text-amber-400"; // Within 3% of entry
       return "text-red-400"; // More than 3% away from entry
@@ -105,17 +107,19 @@ export const SignalRow = memo(
         {/* Price Score */}
         <div className="text-center">
           <p className={cn("font-semibold text-sm", scoreStyles)}>
-            {currentPrice ? `${score.toFixed(2)}%` : "-"}
+            {currentPrice && isFinite(score) ? `${score.toFixed(2)}%` : "-"}
           </p>
-          <div className="mt-1 h-1 w-full max-w-[60px] mx-auto rounded-full bg-muted/50">
-            <div
-              className={cn(
-                "h-full rounded-full",
-                score <= 1 ? "bg-emerald-400" : score <= 3 ? "bg-amber-400" : "bg-red-400"
-              )}
-              style={{ width: `${Math.min(score * 10, 100)}%` }}
-            />
-          </div>
+          {currentPrice && isFinite(score) && (
+            <div className="mt-1 h-1 w-full max-w-[60px] mx-auto rounded-full bg-muted/50">
+              <div
+                className={cn(
+                  "h-full rounded-full",
+                  score <= 1 ? "bg-emerald-400" : score <= 3 ? "bg-amber-400" : "bg-red-400"
+                )}
+                style={{ width: `${Math.min(score * 10, 100)}%` }}
+              />
+            </div>
+          )}
         </div>
 
         {/* Current Price */}

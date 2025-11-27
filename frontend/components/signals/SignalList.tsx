@@ -87,7 +87,7 @@ export function SignalList({
   const [listHeight, setListHeight] = useState<number>(() =>
     typeof window === "undefined"
       ? MIN_LIST_HEIGHT
-      : Math.max(window.innerHeight -   , MIN_LIST_HEIGHT)
+      : Math.max(window.innerHeight - HEIGHT_OFFSET, MIN_LIST_HEIGHT)
   );
 
   useEffect(() => {
