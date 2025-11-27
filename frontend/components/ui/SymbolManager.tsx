@@ -38,7 +38,8 @@ export function SymbolManager({
   onFavoriteChange,
   className = "",
 }: SymbolManagerProps) {
-  const { selectedSymbol, setSelectedSymbol } = useMarketStore();
+  const selectedSymbol = useMarketStore((state) => state.selectedSymbol);
+  const setSelectedSymbol = useMarketStore((state) => state.setSelectedSymbol);
   const [searchQuery, setSearchQuery] = useState("");
   const debouncedSearchQuery = useDebounce(searchQuery, 150);
   const [showFilters, setShowFilters] = useState(false);

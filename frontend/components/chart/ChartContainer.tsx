@@ -35,7 +35,7 @@ interface ChartContainerProps {
 
 export function ChartContainer({
   width,
-  height = 600,
+  height,
 }: ChartContainerProps) {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -359,7 +359,7 @@ export function ChartContainer({
 
   // Reflect height prop changes without recreating the chart
   useEffect(() => {
-    if (!chartRef.current) return;
+    if (!chartRef.current || typeof height !== "number") return;
     try {
       chartRef.current.applyOptions({ height: Math.floor(height) });
     } catch (error) {
@@ -804,9 +804,6 @@ export function ChartContainer({
 
   const chartApi = isChartReady ? chartRef.current : null;
   const priceSeries = isChartReady ? seriesRef.current : null;
-
-  // Calculate height for container
-  const containerHeight = typeof height === "number" ? height : "100%";
 
   return (
     <div className="relative w-full h-full">

@@ -1,5 +1,5 @@
 "use client";
-import { useMemo, useCallback, memo } from "react";
+import { useMemo, memo } from "react";
 import { useMarketStore } from "@/stores/useMarketStore";
 import { useSymbolData } from "@/hooks/useSymbolData";
 import { ChartContainer } from "@/components/chart/ChartContainer";
@@ -80,7 +80,7 @@ function ChartSection({ dashboardData }: ChartSectionProps) {
           }
         >
           <div className="flex-1 min-h-0 relative">
-            <ChartContainer height={undefined} />
+            <ChartContainer />
           </div>
         </ErrorBoundary>
       </Card>
@@ -154,21 +154,11 @@ function SymbolSidebar({ symbolDataState }: SymbolSidebarProps) {
     () => Array.isArray(symbols) ? symbols : [],
     [symbols]
   );
-  
-  const setSelectedSymbol = useMarketStore((state) => state.setSelectedSymbol);
-  
-  const handleSelect = useCallback(
-    (symbol: string) => {
-      setSelectedSymbol(symbol as any);
-    },
-    [setSelectedSymbol]
-  );
 
   return (
     <ResizableSidebar>
       <MemoizedSymbolManager
         symbols={symbolData}
-        onSelect={handleSelect}
         className="h-full"
       />
     </ResizableSidebar>
@@ -179,7 +169,15 @@ function SymbolSidebar({ symbolDataState }: SymbolSidebarProps) {
 function DashboardContent() {
   const dashboardData = useDashboardData();
   const symbolDataState = useSymbolData();
-  const { refreshSwingPoints, isRefreshingSwings } = dashboardData;
+  const { refreshSwingPoints, isRefreshingSwings, isMetadataLoaded } = dashboardData;
+  const { symbols, isLoading: isSymbolLoading, error: symbolError } = symbolDataState;
+
+  const hasSymbols = Array.isArray(symbols) && symbols.length > 0;
+  const isInitializing = !isMetadataLoaded || (!hasSymbols && isSymbolLoading);
+
+  if (isInitializing) {
+    return <DashboardSkeleton />;
+  }
 
   return (
     <div className="flex h-screen bg-background overflow-hidden">
@@ -218,6 +216,11 @@ function DashboardContent() {
               onRefreshSwings={refreshSwingPoints}
               isRefreshingSwings={isRefreshingSwings}
             />
+            {symbolError && (
+              <p className="text-xs text-amber-400">
+                {symbolError}
+              </p>
+            )}
           </div>
         </div>
 
