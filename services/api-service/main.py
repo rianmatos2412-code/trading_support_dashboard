@@ -127,6 +127,71 @@ class SymbolFilterResponse(BaseModel):
     updated_at: Optional[datetime]
 
 
+class TradingSignalResponse(BaseModel):
+    id: int
+    symbol: str
+    timeframe: Optional[str] = None
+    timestamp: datetime
+    market_score: Optional[float] = None
+    direction: str
+    price: float
+    entry1: Optional[float] = None
+    entry2: Optional[float] = None
+    sl: Optional[float] = None
+    tp1: Optional[float] = None
+    tp2: Optional[float] = None
+    tp3: Optional[float] = None
+    swing_high: Optional[float] = None
+    swing_high_timestamp: Optional[datetime] = None
+    swing_low: Optional[float] = None
+    swing_low_timestamp: Optional[datetime] = None
+    support_level: Optional[float] = None
+    resistance_level: Optional[float] = None
+    confluence: Optional[str] = None
+    risk_reward_ratio: Optional[float] = None
+    pullback_detected: bool = False
+    confidence_score: Optional[float] = None
+
+
+def build_trading_signal(alert: Dict[str, Any]) -> TradingSignalResponse:
+    entry_price = alert.get("entry1") or alert.get("entry_price") or alert.get("price")
+    price = alert.get("price") or entry_price or 0.0
+    direction = (alert.get("direction") or "long").lower()
+    timestamp = alert.get("timestamp") or datetime.utcnow()
+
+    return TradingSignalResponse(
+        id=alert.get("id"),
+        symbol=alert.get("symbol"),
+        timeframe=alert.get("timeframe"),
+        timestamp=timestamp,
+        market_score=alert.get("market_score") or alert.get("confidence_score") or 0,
+        direction="short" if direction == "short" else "long",
+        price=price,
+        entry1=entry_price,
+        entry2=alert.get("entry2"),
+        sl=alert.get("sl") or alert.get("stop_loss"),
+        tp1=alert.get("tp1") or alert.get("take_profit_1"),
+        tp2=alert.get("tp2") or alert.get("take_profit_2"),
+        tp3=alert.get("tp3") or alert.get("take_profit_3"),
+        swing_high=alert.get("swing_high") or alert.get("swing_high_price"),
+        swing_high_timestamp=alert.get("swing_high_timestamp"),
+        swing_low=alert.get("swing_low") or alert.get("swing_low_price"),
+        swing_low_timestamp=alert.get("swing_low_timestamp"),
+        support_level=alert.get("support_level"),
+        resistance_level=alert.get("resistance_level"),
+        confluence=alert.get("confluence") or alert.get("risk_score"),
+        risk_reward_ratio=alert.get("risk_reward_ratio"),
+        pullback_detected=bool(alert.get("pullback_detected") or alert.get("pullbackDetected") or False),
+        confidence_score=alert.get("confidence_score"),
+    )
+
+
+def signal_to_dict(signal: TradingSignalResponse) -> Dict[str, Any]:
+    if hasattr(signal, "model_dump"):
+        return signal.model_dump()
+    return signal.dict()
+
+
 # ============================================================================
 # WebSocket Connection Manager (Improved)
 # ============================================================================
@@ -260,31 +325,15 @@ class ConnectionManager:
         if swing_high_timestamp and not isinstance(swing_high_timestamp, str):
             swing_high_timestamp = swing_high_timestamp.isoformat() if hasattr(swing_high_timestamp, 'isoformat') else str(swing_high_timestamp)
         
-        signal_data = {
-            "id": alert_data.get("id"),
-            "symbol": symbol,
-            "timeframe": timeframe,
+        normalized_alert = {
+            **alert_data,
             "timestamp": timestamp or datetime.now().isoformat(),
-            "market_score": 0,
-            "direction": alert_data.get("direction", "long"),
-            "price": alert_data.get("entry_price", 0),
-            "entry1": alert_data.get("entry_price"),
-            "entry2": None,
-            "sl": alert_data.get("stop_loss"),
-            "tp1": alert_data.get("take_profit_1"),
-            "tp2": alert_data.get("take_profit_2"),
-            "tp3": alert_data.get("take_profit_3"),
-            "swing_high": alert_data.get("swing_high_price"),
             "swing_high_timestamp": swing_high_timestamp,
-            "swing_low": alert_data.get("swing_low_price"),
             "swing_low_timestamp": swing_low_timestamp,
-            "support_level": None,
-            "resistance_level": None,
-            "confluence": alert_data.get("risk_score"),
-            "risk_reward_ratio": None,
-            "pullback_detected": False,
-            "confidence_score": None
         }
+
+        signal_model = build_trading_signal(normalized_alert)
+        signal_data = signal_to_dict(signal_model)
         
         async with self._lock:
             ws_ids = list(self.active_connections.keys())
@@ -495,6 +544,38 @@ async def get_alerts_summary(
         )
         for a in alerts
     ]
+
+
+@app.get("/signals", response_model=List[TradingSignalResponse])
+async def get_trading_signals(
+    symbol: Optional[str] = Query(None),
+    timeframe: Optional[str] = Query(None),
+    direction: Optional[str] = Query(None),
+    limit: int = Query(100, ge=1, le=1000),
+    alert_service: AlertService = Depends(get_alert_service_from_db)
+):
+    """Get trading signals in frontend-ready format"""
+    alerts = alert_service.get_alerts(
+        symbol=symbol,
+        timeframe=timeframe,
+        direction=direction,
+        limit=limit
+    )
+    return [build_trading_signal(alert) for alert in alerts]
+
+
+@app.get("/signals/{symbol}/latest", response_model=TradingSignalResponse)
+async def get_latest_signal(
+    symbol: str,
+    timeframe: Optional[str] = Query(None),
+    alert_service: AlertService = Depends(get_alert_service_from_db)
+):
+    """Get the latest trading signal for a symbol"""
+    try:
+        alert = alert_service.get_latest_alert(symbol, timeframe)
+        return build_trading_signal(alert)
+    except NotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 
 # ============================================================================

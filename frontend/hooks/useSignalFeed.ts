@@ -4,8 +4,22 @@ import { useEffect, useRef, useState } from "react";
 import { TradingSignal } from "@/lib/api";
 import { useSignalsStore } from "@/stores/useSignalsStore";
 
-const SIGNALS_WS_URL =
-  process.env.NEXT_PUBLIC_SIGNALS_WS_URL || "ws://localhost:8000/ws";
+const getSignalsWsUrl = (): string => {
+  const url = process.env.NEXT_PUBLIC_SIGNALS_WS_URL || "ws://localhost:8000/ws";
+  // Validate URL is not a placeholder
+  if (url.includes("<PUT YOUR") || url.includes("PUT YOUR") || url.trim() === "") {
+    console.warn("Invalid SIGNALS_WS_URL detected, using default");
+    return "ws://localhost:8000/ws";
+  }
+  // Basic URL validation
+  if (!url.startsWith("ws://") && !url.startsWith("wss://")) {
+    console.warn("SIGNALS_WS_URL must start with ws:// or wss://, using default");
+    return "ws://localhost:8000/ws";
+  }
+  return url;
+};
+
+const SIGNALS_WS_URL = getSignalsWsUrl();
 const FLUSH_INTERVAL_MS = 300;
 const INITIAL_BACKOFF_MS = 1000;
 const MAX_BACKOFF_MS = 15_000;
@@ -94,6 +108,11 @@ export function useSignalFeed() {
 
     const connect = () => {
       if (isUnmountedRef.current) return;
+      if (!SIGNALS_WS_URL) {
+        console.error("SIGNALS_WS_URL is not configured");
+        setStatus("disconnected");
+        return;
+      }
       cleanupSocket();
       setStatus("connecting");
       try {

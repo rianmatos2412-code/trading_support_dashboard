@@ -5,7 +5,7 @@ import { TradingSignal } from "@/lib/api";
 
 type SignalMap = Record<string, TradingSignal>;
 
-const MAX_SIGNALS = 10_000;
+const MAX_SIGNALS = 10000;
 
 interface SignalStoreState {
   signalMap: SignalMap;
