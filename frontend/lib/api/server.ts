@@ -2,8 +2,17 @@
  * Server-side API calls with Next.js caching
  * Use this in Server Components and Route Handlers
  */
-import { Candle, TradingSignal, MarketMetadata, SymbolDetails } from "./types";
+import {
+  Candle,
+  TradingSignal,
+  MarketMetadata,
+  SymbolDetails,
+} from "./types";
 import type { SymbolItem } from "@/components/ui/SymbolManager";
+import {
+  mapAlertRecordToSignal,
+  mapSignalResponseToSignal,
+} from "./normalizeSignal";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -37,35 +46,6 @@ function buildFetchOptions(
   return fetchOptions;
 }
 
-// Helper to map alert to signal
-function mapAlertToSignal(alert: any): TradingSignal {
-  return {
-    id: alert.id,
-    symbol: alert.symbol,
-    timeframe: alert.timeframe,
-    timestamp: alert.timestamp,
-    market_score: 0,
-    direction: alert.direction || "long",
-    price: alert.entry_price,
-    entry1: alert.entry_price,
-    entry2: undefined,
-    sl: alert.stop_loss,
-    tp1: alert.take_profit_1,
-    tp2: alert.take_profit_2,
-    tp3: alert.take_profit_3,
-    swing_high: alert.swing_high_price,
-    swing_high_timestamp: alert.swing_high_timestamp,
-    swing_low: alert.swing_low_price,
-    swing_low_timestamp: alert.swing_low_timestamp,
-    support_level: undefined,
-    resistance_level: undefined,
-    confluence: alert.risk_score,
-    risk_reward_ratio: undefined,
-    pullback_detected: false,
-    confidence_score: undefined,
-  };
-}
-
 export async function fetchSignals(
   params?: {
     symbol?: string;
@@ -81,17 +61,27 @@ export async function fetchSignals(
   if (params?.direction) queryParams.append("direction", params.direction);
   if (params?.limit) queryParams.append("limit", params.limit.toString());
 
-  const response = await fetch(
+  const signalsResponse = await fetch(
+    `${API_URL}/signals?${queryParams}`,
+    buildFetchOptions(30, options)
+  );
+
+  if (signalsResponse.ok) {
+    const signals = await signalsResponse.json();
+    return signals.map(mapSignalResponseToSignal);
+  }
+
+  const fallbackResponse = await fetch(
     `${API_URL}/alerts?${queryParams}`,
     buildFetchOptions(30, options)
   );
 
-  if (!response.ok) {
-    throw new Error(`Failed to fetch alerts: ${response.statusText}`);
+  if (!fallbackResponse.ok) {
+    throw new Error(`Failed to fetch alerts: ${fallbackResponse.statusText}`);
   }
 
-  const alerts = await response.json();
-  return alerts.map(mapAlertToSignal);
+  const alerts = await fallbackResponse.json();
+  return alerts.map(mapAlertRecordToSignal);
 }
 
 export async function fetchLatestSignal(
@@ -101,18 +91,30 @@ export async function fetchLatestSignal(
 ): Promise<TradingSignal | null> {
   try {
     const url = timeframe
-      ? `${API_URL}/alerts/${symbol}/latest?timeframe=${timeframe}`
-      : `${API_URL}/alerts/${symbol}/latest`;
+      ? `${API_URL}/signals/${symbol}/latest?timeframe=${timeframe}`
+      : `${API_URL}/signals/${symbol}/latest`;
 
     const response = await fetch(url, buildFetchOptions(30, options));
 
     if (response.status === 404) return null;
-    if (!response.ok) {
-      throw new Error(`Failed to fetch latest alert: ${response.statusText}`);
+    if (response.ok) {
+      const signal = await response.json();
+      return mapSignalResponseToSignal(signal);
     }
 
-    const alert = await response.json();
-    return mapAlertToSignal(alert);
+    const fallbackUrl = timeframe
+      ? `${API_URL}/alerts/${symbol}/latest?timeframe=${timeframe}`
+      : `${API_URL}/alerts/${symbol}/latest`;
+
+    const fallback = await fetch(fallbackUrl, buildFetchOptions(30, options));
+
+    if (fallback.status === 404) return null;
+    if (!fallback.ok) {
+      throw new Error(`Failed to fetch latest alert: ${fallback.statusText}`);
+    }
+
+    const alert = await fallback.json();
+    return mapAlertRecordToSignal(alert);
   } catch (error) {
     console.error("Error fetching latest signal:", error);
     return null;
@@ -140,7 +142,7 @@ export async function fetchAlertsForSwings(
   }
 
   const alerts = await response.json();
-  return alerts.map(mapAlertToSignal);
+  return alerts.map(mapAlertRecordToSignal);
 }
 
 export async function fetchCandles(

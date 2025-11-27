@@ -3,37 +3,12 @@
  * Use this in Client Components for mutations and real-time updates
  */
 import { Candle, TradingSignal, SymbolDetails } from "./types";
+import {
+  mapAlertRecordToSignal,
+  mapSignalResponseToSignal,
+} from "./normalizeSignal";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-
-// Helper to map alert to signal
-function mapAlertToSignal(alert: any): TradingSignal {
-  return {
-    id: alert.id,
-    symbol: alert.symbol,
-    timeframe: alert.timeframe,
-    timestamp: alert.timestamp,
-    market_score: 0,
-    direction: alert.direction || "long",
-    price: alert.entry_price,
-    entry1: alert.entry_price,
-    entry2: undefined,
-    sl: alert.stop_loss,
-    tp1: alert.take_profit_1,
-    tp2: alert.take_profit_2,
-    tp3: alert.take_profit_3,
-    swing_high: alert.swing_high_price,
-    swing_high_timestamp: alert.swing_high_timestamp,
-    swing_low: alert.swing_low_price,
-    swing_low_timestamp: alert.swing_low_timestamp,
-    support_level: undefined,
-    resistance_level: undefined,
-    confluence: alert.risk_score,
-    risk_reward_ratio: undefined,
-    pullback_detected: false,
-    confidence_score: undefined,
-  };
-}
 
 export async function fetchSignals(params?: {
   symbol?: string;
@@ -47,19 +22,32 @@ export async function fetchSignals(params?: {
   if (params?.direction) queryParams.append("direction", params.direction);
   if (params?.limit) queryParams.append("limit", params.limit.toString());
 
-  const response = await fetch(`${API_URL}/alerts?${queryParams}`);
-  if (!response.ok) throw new Error("Failed to fetch alerts");
-  const alerts = await response.json();
-  return alerts.map(mapAlertToSignal);
+  const response = await fetch(`${API_URL}/signals?${queryParams}`);
+  if (response.ok) {
+    const signals = await response.json();
+    return signals.map(mapSignalResponseToSignal);
+  }
+
+  const fallback = await fetch(`${API_URL}/alerts?${queryParams}`);
+  if (!fallback.ok) throw new Error("Failed to fetch alerts");
+  const alerts = await fallback.json();
+  return alerts.map(mapAlertRecordToSignal);
 }
 
 export async function fetchLatestSignal(symbol: string): Promise<TradingSignal | null> {
   try {
-    const response = await fetch(`${API_URL}/alerts/${symbol}/latest`);
+    const response = await fetch(`${API_URL}/signals/${symbol}/latest`);
     if (response.status === 404) return null;
-    if (!response.ok) throw new Error("Failed to fetch latest alert");
-    const alert = await response.json();
-    return mapAlertToSignal(alert);
+    if (response.ok) {
+      const signal = await response.json();
+      return mapSignalResponseToSignal(signal);
+    }
+
+    const fallback = await fetch(`${API_URL}/alerts/${symbol}/latest`);
+    if (fallback.status === 404) return null;
+    if (!fallback.ok) throw new Error("Failed to fetch latest alert");
+    const alert = await fallback.json();
+    return mapAlertRecordToSignal(alert);
   } catch (error) {
     console.error("Error fetching latest signal:", error);
     return null;
@@ -79,7 +67,7 @@ export async function fetchAlertsForSwings(
   const response = await fetch(`${API_URL}/alerts/${symbol}/swings?${queryParams.toString()}`);
   if (!response.ok) throw new Error("Failed to fetch alerts for swings");
   const alerts = await response.json();
-  return alerts.map(mapAlertToSignal);
+  return alerts.map(mapAlertRecordToSignal);
 }
 
 export async function fetchCandles(

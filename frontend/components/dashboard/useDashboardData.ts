@@ -33,6 +33,75 @@ export function useDashboardData() {
   const [allSignals, setAllSignals] = useState<TradingSignal[]>([]);
   const [currentSignalIndex, setCurrentSignalIndex] = useState<number>(0);
   const [isLoadingSignals, setIsLoadingSignals] = useState(false);
+  const [isMetadataLoaded, setIsMetadataLoaded] = useState(false);
+
+  // Load metadata FIRST - this should run on mount
+  const loadMetadata = useCallback(async () => {
+    try {
+      const metadata = await fetchMarketMetadata();
+      setMarketMetadata(metadata);
+      setIsMetadataLoaded(true); // Mark metadata as loaded
+    } catch (error) {
+      console.error("Error loading market metadata:", error);
+      // Even on error, mark as loaded to prevent infinite waiting
+      setIsMetadataLoaded(true);
+    }
+  }, [setMarketMetadata]);
+
+  // Load metadata on mount
+  useEffect(() => {
+    let isMounted = true;
+
+    loadMetadata();
+
+    const handleRefresh = () => {
+      if (isMounted) {
+        loadMetadata();
+      }
+    };
+
+    window.addEventListener('refreshMarketData', handleRefresh);
+    window.addEventListener('ingestionConfigUpdated', handleRefresh);
+
+    return () => {
+      isMounted = false;
+      window.removeEventListener('refreshMarketData', handleRefresh);
+      window.removeEventListener('ingestionConfigUpdated', handleRefresh);
+    };
+  }, [loadMetadata]);
+
+  // Validate symbol AFTER metadata is loaded
+  useEffect(() => {
+    if (!isMetadataLoaded || !availableSymbols.length) return;
+    
+    if (!availableSymbols.includes(selectedSymbol)) {
+      setSelectedSymbol(availableSymbols[0]);
+    }
+  }, [isMetadataLoaded, availableSymbols, selectedSymbol, setSelectedSymbol]);
+
+  // Validate timeframe AFTER metadata is loaded
+  useEffect(() => {
+    if (!isMetadataLoaded) return;
+    
+    const symbolSpecificTimeframes =
+      symbolTimeframes[selectedSymbol] && symbolTimeframes[selectedSymbol].length
+        ? symbolTimeframes[selectedSymbol]
+        : availableTimeframes;
+
+    if (
+      symbolSpecificTimeframes.length &&
+      !symbolSpecificTimeframes.includes(selectedTimeframe)
+    ) {
+      setSelectedTimeframe(symbolSpecificTimeframes[0] as Timeframe);
+    }
+  }, [
+    isMetadataLoaded,
+    selectedSymbol,
+    selectedTimeframe,
+    symbolTimeframes,
+    availableTimeframes,
+    setSelectedTimeframe,
+  ]);
 
   // Refresh swing points
   const refreshSwingPoints = useCallback(async () => {
@@ -76,7 +145,27 @@ export function useDashboardData() {
 
       setSwingPoints(uniqueSwingPoints);
 
-      if (alerts.length > 0) {
+      // Only set signal from swing points if there's no preset signal
+      // Check for presetSignal in sessionStorage first
+      let hasPresetSignal = false;
+      try {
+        const stored = sessionStorage.getItem('presetSignal');
+        if (stored) {
+          hasPresetSignal = true;
+        }
+      } catch (e) {
+        // Ignore
+      }
+
+      // Also check if latestSignal was already set (from navigation)
+      const currentLatestSignal = useMarketStore.getState().latestSignal;
+      const hasExistingSignal = currentLatestSignal && 
+        currentLatestSignal.symbol === selectedSymbol && 
+        currentLatestSignal.timeframe === selectedTimeframe;
+
+
+      // Only overwrite if there's no preset signal and no existing signal
+      if (!hasPresetSignal && !hasExistingSignal && alerts.length > 0) {
         const sortedAlerts = [...alerts].sort(
           (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
         );
@@ -90,18 +179,10 @@ export function useDashboardData() {
     }
   }, [selectedSymbol, selectedTimeframe, setSwingPoints, setLatestSignal, setError]);
 
-  // Load metadata
-  const loadMetadata = useCallback(async () => {
-    try {
-      const metadata = await fetchMarketMetadata();
-      setMarketMetadata(metadata);
-    } catch (error) {
-      console.error("Error loading market metadata:", error);
-    }
-  }, [setMarketMetadata]);
-
-  // Load initial data
+  // Load initial data ONLY AFTER metadata is loaded
   useEffect(() => {
+    if (!isMetadataLoaded) return; // Wait for metadata
+    
     const loadData = async () => {
       setLoading(true);
       setError(null);
@@ -117,67 +198,41 @@ export function useDashboardData() {
     };
 
     loadData();
-  }, [selectedSymbol, selectedTimeframe, setCandles, setLoading, setError]);
+  }, [isMetadataLoaded, selectedSymbol, selectedTimeframe, setCandles, setLoading, setError]);
 
-  // Load swing points
+  // Load swing points ONLY AFTER metadata is loaded
   useEffect(() => {
+    if (!isMetadataLoaded) return; // Wait for metadata
     refreshSwingPoints();
-  }, [selectedSymbol, selectedTimeframe, refreshSwingPoints]);
+  }, [isMetadataLoaded, selectedSymbol, selectedTimeframe, refreshSwingPoints]);
 
-  // Load metadata
+  // Load signals ONLY AFTER metadata is loaded
   useEffect(() => {
-    let isMounted = true;
-
-    loadMetadata();
-
-    const handleRefresh = () => {
-      if (isMounted) {
-        loadMetadata();
-      }
-    };
-
-    window.addEventListener('refreshMarketData', handleRefresh);
-    window.addEventListener('ingestionConfigUpdated', handleRefresh);
-
-    return () => {
-      isMounted = false;
-      window.removeEventListener('refreshMarketData', handleRefresh);
-      window.removeEventListener('ingestionConfigUpdated', handleRefresh);
-    };
-  }, [loadMetadata]);
-
-  // Validate symbol
-  useEffect(() => {
-    if (availableSymbols.length && !availableSymbols.includes(selectedSymbol)) {
-      setSelectedSymbol(availableSymbols[0]);
-    }
-  }, [availableSymbols, selectedSymbol, setSelectedSymbol]);
-
-  // Validate timeframe
-  useEffect(() => {
-    const symbolSpecificTimeframes =
-      symbolTimeframes[selectedSymbol] && symbolTimeframes[selectedSymbol].length
-        ? symbolTimeframes[selectedSymbol]
-        : availableTimeframes;
-
-    if (
-      symbolSpecificTimeframes.length &&
-      !symbolSpecificTimeframes.includes(selectedTimeframe)
-    ) {
-      setSelectedTimeframe(symbolSpecificTimeframes[0] as Timeframe);
-    }
-  }, [
-    selectedSymbol,
-    selectedTimeframe,
-    symbolTimeframes,
-    availableTimeframes,
-    setSelectedTimeframe,
-  ]);
-
-  // Load signals
-  useEffect(() => {
+    if (!isMetadataLoaded) return; // Wait for metadata
+    
     const loadSignals = async () => {
       setIsLoadingSignals(true);
+      
+      // Check for presetSignal FIRST, before fetching
+      let presetSignal: TradingSignal | null = null;
+      try {
+        const stored = sessionStorage.getItem('presetSignal');
+        if (stored) {
+          presetSignal = JSON.parse(stored);
+          // Don't remove it yet - we'll remove it after we've processed it
+        }
+      } catch (e) {
+        console.warn("Failed to parse preset signal:", e);
+      }
+
+      // If we have a preset signal, set it immediately to preserve it
+      if (presetSignal && 
+          presetSignal.symbol === selectedSymbol && 
+          presetSignal.timeframe === selectedTimeframe) {
+        // Set it immediately so it doesn't get overwritten
+        setLatestSignal(presetSignal);
+      }
+
       try {
         const signals = await fetchSignals({
           symbol: selectedSymbol,
@@ -192,16 +247,7 @@ export function useDashboardData() {
 
         setAllSignals(filteredSignals);
 
-        let presetSignal: TradingSignal | null = null;
-        try {
-          const stored = sessionStorage.getItem('presetSignal');
-          if (stored) {
-            presetSignal = JSON.parse(stored);
-            sessionStorage.removeItem('presetSignal');
-          }
-        } catch (e) {
-          console.warn("Failed to parse preset signal:", e);
-        }
+        // Now process the presetSignal with the fetched signals
 
         if (!presetSignal) {
           const currentLatestSignal = useMarketStore.getState().latestSignal;
@@ -219,9 +265,8 @@ export function useDashboardData() {
             (s) => {
               if (s.id && presetSignal!.id && s.id === presetSignal!.id) return true;
               if (s.timestamp === presetSignal!.timestamp && 
-                  (s.entry1 || s.price) === (presetSignal!.entry1 || presetSignal!.price)) return true;
-              if (s.timestamp === presetSignal!.timestamp && 
-                  s.symbol === presetSignal!.symbol) return true;
+                  (s.entry1 || s.price) === (presetSignal!.entry1 || presetSignal!.price) && 
+                s.swing_high === presetSignal!.swing_high && s.swing_low === presetSignal!.swing_low) return true;
               return false;
             }
           );
@@ -230,12 +275,16 @@ export function useDashboardData() {
             setCurrentSignalIndex(presetIndex);
             setLatestSignal(filteredSignals[presetIndex]);
           } else if (filteredSignals.length > 0) {
+            // Signal not in list, but keep it and set index to 0
             setCurrentSignalIndex(0);
             setLatestSignal(presetSignal);
           } else {
             setCurrentSignalIndex(0);
             setLatestSignal(presetSignal || null);
           }
+          
+          // Remove from sessionStorage after processing
+          sessionStorage.removeItem('presetSignal');
         } else if (filteredSignals.length > 0) {
           setCurrentSignalIndex(0);
           setLatestSignal(filteredSignals[0]);
@@ -254,7 +303,7 @@ export function useDashboardData() {
     };
 
     loadSignals();
-  }, [selectedSymbol, selectedTimeframe, setLatestSignal]);
+  }, [isMetadataLoaded, selectedSymbol, selectedTimeframe, setLatestSignal]);
 
   // Update signal when index changes
   useEffect(() => {
@@ -290,6 +339,7 @@ export function useDashboardData() {
     isLoadingSignals,
     handlePreviousSignal,
     handleNextSignal,
+    isMetadataLoaded, // Expose this so UI can show loading state
   };
 }
 
