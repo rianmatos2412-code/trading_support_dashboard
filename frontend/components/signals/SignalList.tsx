@@ -21,7 +21,7 @@ interface SignalListRowProps {
   symbols: SymbolItem[];
 }
 
-const DEFAULT_ROW_HEIGHT = 80;
+const DEFAULT_ROW_HEIGHT = 60;
 const MIN_LIST_HEIGHT = 360;
 const HEIGHT_OFFSET = 320;
 
@@ -87,7 +87,7 @@ export function SignalList({
   const [listHeight, setListHeight] = useState<number>(() =>
     typeof window === "undefined"
       ? MIN_LIST_HEIGHT
-      : Math.max(window.innerHeight - HEIGHT_OFFSET, MIN_LIST_HEIGHT)
+      : Math.max(window.innerHeight -   , MIN_LIST_HEIGHT)
   );
 
   useEffect(() => {

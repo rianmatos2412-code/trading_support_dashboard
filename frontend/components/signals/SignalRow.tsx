@@ -48,32 +48,11 @@ export const SignalRow = memo(
       return "text-red-400"; // More than 3% away from entry
     }, [score]);
 
-    const priceTargets = useMemo(
-      () =>
-        [signal.tp1, signal.tp2, signal.tp3]
-          .filter((value): value is number => typeof value === "number"),
-      [signal.tp1, signal.tp2, signal.tp3]
-    );
-
-    const stopLoss = useMemo(() => {
-      return signal.sl ?? null;
-    }, [signal.sl]);
-
-    const swingHigh = useMemo(() => {
-      return signal.swing_high ?? null;
-    }, [signal.swing_high]);
-
-    const swingHighTimestamp = useMemo(() => {
-      return signal.swing_high_timestamp ? formatTimestamp(signal.swing_high_timestamp) : null;
-    }, [signal.swing_high_timestamp]);
-
-    const swingLow = useMemo(() => {
-      return signal.swing_low ?? null;
-    }, [signal.swing_low]);
-
-    const swingLowTimestamp = useMemo(() => {
-      return signal.swing_low_timestamp ? formatTimestamp(signal.swing_low_timestamp) : null;
-    }, [signal.swing_low_timestamp]);
+    const stopLoss = signal.sl ?? null;
+    const swingHigh = signal.swing_high ?? null;
+    const swingLow = signal.swing_low ?? null;
+    const swingHighTimestamp = signal.swing_high_timestamp ? formatTimestamp(signal.swing_high_timestamp) : null;
+    const swingLowTimestamp = signal.swing_low_timestamp ? formatTimestamp(signal.swing_low_timestamp) : null;
 
     const handleViewChart = async (e: React.MouseEvent) => {
       e.stopPropagation(); // Prevent any parent click handlers
@@ -97,18 +76,18 @@ export const SignalRow = memo(
     return (
       <div
         className={cn(
-          "grid grid-cols-[150px_100px_80px_100px_120px_100px_100px_100px_100px_120px_120px_120px_120px_100px] gap-4 items-center w-full border-b border-border/60 bg-card/70 px-4 py-3 transition hover:bg-card/90",
-          directionIsLong ? "hover:border-l-2 hover:border-l-emerald-500/50" : "hover:border-l-2 hover:border-l-red-500/50"
+          "grid grid-cols-[150px_100px_80px_100px_120px_100px_100px_100px_100px_120px_120px_120px_120px_100px] gap-4 items-center w-full",
+          "border-b border-border/50 bg-card px-4 py-2.5"
         )}
       >
         {/* Symbol */}
-        <div className="font-semibold tracking-tight text-foreground">
+        <div className="font-semibold text-sm text-foreground">
           {signal.symbol.replace("USDT", "/USDT")}
         </div>
 
         {/* Direction */}
         <div>
-          <Badge variant={directionIsLong ? "long" : "short"} className="px-2 py-1 text-[11px]">
+          <Badge variant={directionIsLong ? "long" : "short"} className="px-2 py-0.5 text-[10px] font-medium">
             {directionIsLong ? (
               <TrendingUp className="mr-1 h-3 w-3" />
             ) : (
@@ -119,7 +98,7 @@ export const SignalRow = memo(
         </div>
 
         {/* Timeframe */}
-        <div className="text-xs uppercase text-muted-foreground">
+        <div className="text-xs uppercase font-medium text-muted-foreground">
           {signal.timeframe || "-"}
         </div>
 
@@ -128,104 +107,96 @@ export const SignalRow = memo(
           <p className={cn("font-semibold text-sm", scoreStyles)}>
             {currentPrice ? `${score.toFixed(2)}%` : "-"}
           </p>
-          <div className="mt-1 h-1 w-full rounded-full bg-muted">
+          <div className="mt-1 h-1 w-full max-w-[60px] mx-auto rounded-full bg-muted/50">
             <div
               className={cn(
-                "h-full rounded-full transition-all",
+                "h-full rounded-full",
                 score <= 1 ? "bg-emerald-400" : score <= 3 ? "bg-amber-400" : "bg-red-400"
               )}
-              style={{ width: `${Math.min(score, 10)}%` }}
+              style={{ width: `${Math.min(score * 10, 100)}%` }}
             />
           </div>
         </div>
 
         {/* Current Price */}
         <div className="text-right">
-          <p className="font-mono text-sm font-medium text-foreground">
+          <p className="font-mono text-sm font-semibold text-foreground">
             {currentPrice ? formatPrice(currentPrice) : formatPrice(signal.price)}
           </p>
         </div>
 
         {/* Entry */}
         <div className="text-right">
-          <p className="font-mono text-sm text-foreground">{formatPrice(entryPrice)}</p>
+          <p className="font-mono text-sm text-foreground/90">{formatPrice(entryPrice)}</p>
         </div>
 
         {/* Stop Loss */}
         <div className="text-right">
           {stopLoss !== null ? (
-            <>
-              <p className="font-mono text-sm text-red-400">{formatPrice(stopLoss)}</p>
-            </>
+            <p className="font-mono text-sm text-red-400/90">{formatPrice(stopLoss)}</p>
           ) : (
-            <span className="text-muted-foreground text-xs">-</span>
+            <span className="text-muted-foreground/60 text-xs">-</span>
           )}
         </div>
 
         {/* TP1 */}
         <div className="text-right">
           {signal.tp1 ? (
-            <>
-              <p className="font-mono text-sm text-foreground">{formatPrice(signal.tp1)}</p>
-            </>
+            <p className="font-mono text-sm text-emerald-400/90">{formatPrice(signal.tp1)}</p>
           ) : (
-            <span className="text-muted-foreground text-xs">-</span>
+            <span className="text-muted-foreground/60 text-xs">-</span>
           )}
         </div>
 
         {/* TP2 */}
         <div className="text-right">
           {signal.tp2 ? (
-            <>
-              <p className="font-mono text-sm text-foreground">{formatPrice(signal.tp2)}</p>
-            </>
+            <p className="font-mono text-sm text-emerald-500/90">{formatPrice(signal.tp2)}</p>
           ) : (
-            <span className="text-muted-foreground text-xs">-</span>
+            <span className="text-muted-foreground/60 text-xs">-</span>
           )}
         </div>
 
         {/* TP3 */}
         <div className="text-right">
           {signal.tp3 ? (
-            <>
-              <p className="font-mono text-sm text-foreground">{formatPrice(signal.tp3)}</p>
-            </>
+            <p className="font-mono text-sm text-emerald-600/90">{formatPrice(signal.tp3)}</p>
           ) : (
-            <span className="text-muted-foreground text-xs">-</span>
+            <span className="text-muted-foreground/60 text-xs">-</span>
           )}
         </div>
 
         {/* Swing High */}
         <div className="text-right">
           {swingHigh !== null ? (
-            <>
-              <p className="font-mono text-sm text-emerald-400">{formatPrice(swingHigh)}</p>
+            <div>
+              <p className="font-mono text-sm text-emerald-400/90">{formatPrice(swingHigh)}</p>
               {swingHighTimestamp && (
-                <p className="text-[9px] text-muted-foreground">{swingHighTimestamp}</p>
+                <p className="text-[9px] text-muted-foreground/70 mt-0.5">{swingHighTimestamp}</p>
               )}
-            </>
+            </div>
           ) : (
-            <span className="text-muted-foreground text-xs">-</span>
+            <span className="text-muted-foreground/60 text-xs">-</span>
           )}
         </div>
 
         {/* Swing Low */}
         <div className="text-right">
           {swingLow !== null ? (
-            <>
-              <p className="font-mono text-sm text-red-400">{formatPrice(swingLow)}</p>
+            <div>
+              <p className="font-mono text-sm text-red-400/90">{formatPrice(swingLow)}</p>
               {swingLowTimestamp && (
-                <p className="text-[9px] text-muted-foreground">{swingLowTimestamp}</p>
+                <p className="text-[9px] text-muted-foreground/70 mt-0.5">{swingLowTimestamp}</p>
               )}
-            </>
+            </div>
           ) : (
-            <span className="text-muted-foreground text-xs">-</span>
+            <span className="text-muted-foreground/60 text-xs">-</span>
           )}
         </div>
 
         {/* Timestamp */}
         <div className="text-right">
-          <p className="text-xs text-muted-foreground">{lastUpdated}</p>
+          <p className="text-xs text-muted-foreground/80">{lastUpdated}</p>
         </div>
 
         {/* Action Button */}
@@ -234,9 +205,9 @@ export const SignalRow = memo(
             variant="outline"
             size="sm"
             onClick={handleViewChart}
-            className="h-8 px-3"
+            className="h-7 px-2.5"
           >
-            <ArrowRight className="h-4 w-4" />
+            <ArrowRight className="h-3.5 w-3.5" />
           </Button>
         </div>
       </div>
