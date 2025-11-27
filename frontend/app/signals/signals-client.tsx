@@ -62,7 +62,6 @@ export function SignalsClient({ initialSignals }: SignalsClientProps) {
   const [fixedOrder, setFixedOrder] = useState<string[]>([]);
   const setInitialSignals = useSignalsStore((state) => state.setInitialSignals);
   const signalIds = useSignalsStore((state) => state.signalIds);
-  const revision = useSignalsStore((state) => state.revision);
   const { status, lastMessageAt } = useSignalFeed();
   const { symbols } = useSymbolData();
 
@@ -141,7 +140,7 @@ export function SignalsClient({ initialSignals }: SignalsClientProps) {
     });
 
     return sorted;
-  }, [signalIds, searchTerm, directionFilter, minPrice, maxPrice, revision, sortField, sortDirection, symbols, isFixed, fixedOrder]);
+  }, [signalIds, searchTerm, directionFilter, minPrice, maxPrice, sortField, sortDirection, symbols, isFixed, fixedOrder]);
 
   const totalSignals = signalIds.length;
 

@@ -14,12 +14,12 @@ interface SignalListProps {
   overscanCount?: number;
 }
 
-interface VirtualizedRowProps extends RowComponentProps<SignalListRowProps> {}
-
-interface SignalListRowProps {
+type SignalListRowData = {
   ids: string[];
   symbols: SymbolItem[];
-}
+};
+
+type VirtualizedRowProps = RowComponentProps<SignalListRowData>;
 
 const DEFAULT_ROW_HEIGHT = 60;
 const MIN_LIST_HEIGHT = 360;
@@ -32,13 +32,18 @@ const rowsAreEqual = (prev: VirtualizedRowProps, next: VirtualizedRowProps) =>
   prev.symbols === next.symbols &&
   prev["ariaAttributes"] === next["ariaAttributes"];
 
-const VirtualizedRow = memo(
-  ({ index, style, ids, symbols, ariaAttributes }: VirtualizedRowProps) => {
+const VirtualizedRowBase = ({
+  index,
+  style,
+  ids,
+  symbols,
+  ariaAttributes,
+}: VirtualizedRowProps) => {
     const signalId = ids[index];
     const signal = useSignalsStore((state) => state.signalMap[signalId]);
 
     if (!signal) {
-      return null;
+      return <div {...ariaAttributes} style={style} className="px-1" />;
     }
 
     return (
@@ -46,11 +51,13 @@ const VirtualizedRow = memo(
         <SignalRow signal={signal} symbols={symbols} />
       </div>
     );
-  },
-  rowsAreEqual
-);
+};
 
-VirtualizedRow.displayName = "VirtualizedRow";
+const MemoizedVirtualizedRow = memo(VirtualizedRowBase, rowsAreEqual);
+MemoizedVirtualizedRow.displayName = "VirtualizedRow";
+const VirtualizedRowRenderer = (props: VirtualizedRowProps) => (
+  <MemoizedVirtualizedRow {...props} />
+);
 
 function SignalTableHeader() {
   return (
@@ -120,7 +127,7 @@ export function SignalList({
     return () => observer.disconnect();
   }, [mounted, signalIds.length]);
 
-  const rowProps = useMemo<SignalListRowProps>(
+  const rowProps = useMemo<SignalListRowData>(
     () => ({
       ids: signalIds,
       symbols,
@@ -150,13 +157,13 @@ export function SignalList({
         </Card>
       ) : (
         <div className="flex-1 overflow-hidden" style={{ height: availableHeight }}>
-          <List
+          <List<SignalListRowData>
             defaultHeight={availableHeight}
             style={{ height: availableHeight, width: computedWidth }}
             rowCount={signalIds.length}
             rowHeight={rowHeight}
             rowProps={rowProps}
-            rowComponent={VirtualizedRow}
+            rowComponent={VirtualizedRowRenderer}
             overscanCount={overscanCount}
           />
         </div>

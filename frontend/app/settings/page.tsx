@@ -366,7 +366,7 @@ function StrategyConfigTab() {
                   }
                 />
                 <p className="text-xs text-muted-foreground">
-                  JSON format: {"{"}"BTCUSDT": 0.015, "ETHUSDT": 0.015{"}"}
+                  JSON format: {"{"}&quot;BTCUSDT&quot;: 0.015, &quot;ETHUSDT&quot;: 0.015{"}"}
                 </p>
               </div>
             </div>
