@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import {
   IChartApi,
+  IPaneApi,
   ISeriesApi,
   LineData,
   LineSeries,
@@ -12,6 +13,7 @@ import { Candle } from "@/lib/api";
 
 interface RSIIndicatorProps {
   chart: IChartApi | null;
+  pane: IPaneApi<Time> | null;
   candles: Candle[];
   selectedSymbol: string;
   selectedTimeframe: string;
@@ -89,6 +91,7 @@ function calculateRSI(candles: Candle[], period: number = 14): Array<{ time: Tim
 
 export function RSIIndicator({
   chart,
+  pane,
   candles,
   selectedSymbol,
   selectedTimeframe,
@@ -98,7 +101,7 @@ export function RSIIndicator({
   const rsiSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
 
   useEffect(() => {
-    if (!chart) return;
+    if (!chart || !pane) return;
 
     // Filter candles for current symbol and timeframe
     const filteredCandles = candles
@@ -143,11 +146,10 @@ export function RSIIndicator({
         }
       }
 
-      // Create new RSI series
-      const rsiSeries = chart.addSeries(LineSeries, {
+      // Create new RSI series on dedicated pane
+      const rsiSeries = pane.addSeries(LineSeries, {
         color: "#8b5cf6", // Purple color for RSI
         lineWidth: 2,
-        priceScaleId: "rsi", // Use separate price scale
         title: `RSI(${period})`,
       });
 
@@ -157,7 +159,7 @@ export function RSIIndicator({
       const topMargin = (100 - height) / 100;
       rsiSeries.priceScale().applyOptions({
         scaleMargins: {
-          top: Math.max(0.05, Math.min(0.9, topMargin)), // Clamp between 5% and 90%
+          top: 0.2, // Clamp between 5% and 90%
           bottom: 0.05,
         },
         // Note: minimum/maximum are not valid properties in PriceScaleOptions
@@ -201,7 +203,7 @@ export function RSIIndicator({
         rsiSeriesRef.current = null;
       }
     };
-  }, [chart, candles, selectedSymbol, selectedTimeframe, period]);
+  }, [chart, pane, candles, selectedSymbol, selectedTimeframe, period, height]);
 
   return null; // This component doesn't render anything
 }
