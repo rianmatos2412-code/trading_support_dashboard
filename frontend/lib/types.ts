@@ -8,7 +8,6 @@ export type IndicatorType =
   | "MA" 
   | "EMA" 
   | "Volume"
-  | "SR"
   | "ZigZag";
 
 export type IndicatorCategory = "Oscillators" | "Trend" | "Volume" | "Volatility";

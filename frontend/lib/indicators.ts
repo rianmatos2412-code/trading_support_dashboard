@@ -38,14 +38,6 @@ export const INDICATOR_REGISTRY: IndicatorDefinition[] = [
     requiresSeparatePane: false,
   },
   {
-    type: "SR",
-    name: "Support/Resistance",
-    category: "Trend",
-    description: "Support and resistance levels",
-    defaultSettings: {},
-    requiresSeparatePane: false,
-  },
-  {
     type: "ZigZag",
     name: "ZigZag",
     category: "Trend",
