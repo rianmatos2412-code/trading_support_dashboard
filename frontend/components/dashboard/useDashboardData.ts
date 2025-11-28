@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { useMarketStore } from "@/stores/useMarketStore";
 import {
   fetchCandles,
@@ -27,13 +27,69 @@ export function useDashboardData() {
     setSelectedTimeframe,
     setLoading,
     setError,
+    chartSettings,
+    candles,
   } = useMarketStore();
 
   const [isRefreshingSwings, setIsRefreshingSwings] = useState(false);
-  const [allSignals, setAllSignals] = useState<TradingSignal[]>([]);
+  const [allSignalsRaw, setAllSignalsRaw] = useState<TradingSignal[]>([]);
   const [currentSignalIndex, setCurrentSignalIndex] = useState<number>(0);
   const [isLoadingSignals, setIsLoadingSignals] = useState(false);
   const [isMetadataLoaded, setIsMetadataLoaded] = useState(false);
+  
+  // Filter signals based on unmitigated setting
+  // Unmitigated = entry price has never been touched by any candle since signal generation
+  const allSignals = useMemo(() => {
+    if (!chartSettings.showUnmitigatedOnly) {
+      return allSignalsRaw;
+    }
+
+    return allSignalsRaw.filter((signal) => {
+      const entryPrice = signal.entry1 ?? signal.price;
+      if (!entryPrice) return false;
+
+      // Get signal generation time = max(swing_high_timestamp, swing_low_timestamp)
+      const swingHighTime = signal.swing_high_timestamp 
+        ? new Date(signal.swing_high_timestamp).getTime() 
+        : 0;
+      const swingLowTime = signal.swing_low_timestamp 
+        ? new Date(signal.swing_low_timestamp).getTime() 
+        : 0;
+      const signalGenerationTime = Math.max(swingHighTime, swingLowTime);
+      
+      if (signalGenerationTime === 0) return true; // No swing timestamps, include signal
+
+      // Get candles for this signal's symbol and timeframe
+      const signalCandles = Array.isArray(candles) 
+        ? candles.filter(
+            (c) => c.symbol === signal.symbol && c.timeframe === signal.timeframe
+          )
+        : [];
+
+      // Check if any candle from signal generation time to now has touched entry price
+      for (const candle of signalCandles) {
+        const candleTime = new Date(candle.timestamp).getTime();
+        
+        // Only check candles after signal generation
+        if (candleTime < signalGenerationTime) continue;
+
+        // For long: check if candle's low has touched or gone below entry
+        // For short: check if candle's high has touched or gone above entry
+        if (signal.direction === "long") {
+          if (candle.low <= entryPrice) {
+            return false; // Entry has been touched, signal is mitigated
+          }
+        } else {
+          if (candle.high >= entryPrice) {
+            return false; // Entry has been touched, signal is mitigated
+          }
+        }
+      }
+
+      // No candle has touched entry price, signal is unmitigated
+      return true;
+    });
+  }, [allSignalsRaw, chartSettings.showUnmitigatedOnly, candles]);
 
   // Load metadata FIRST - this should run on mount
   const loadMetadata = useCallback(async () => {
@@ -245,7 +301,7 @@ export function useDashboardData() {
             new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
           );
 
-        setAllSignals(filteredSignals);
+        setAllSignalsRaw(filteredSignals);
 
         // Now process the presetSignal with the fetched signals
 
@@ -294,7 +350,7 @@ export function useDashboardData() {
         }
       } catch (error) {
         console.error("Error loading signals:", error);
-        setAllSignals([]);
+        setAllSignalsRaw([]);
         setCurrentSignalIndex(0);
         setLatestSignal(null);
       } finally {
@@ -305,10 +361,18 @@ export function useDashboardData() {
     loadSignals();
   }, [isMetadataLoaded, selectedSymbol, selectedTimeframe, setLatestSignal]);
 
-  // Update signal when index changes
+  // Update signal when index changes or when filtered signals change
   useEffect(() => {
-    if (allSignals.length > 0 && currentSignalIndex >= 0 && currentSignalIndex < allSignals.length) {
-      setLatestSignal(allSignals[currentSignalIndex]);
+    // Adjust index if it's out of bounds after filtering
+    if (allSignals.length > 0) {
+      const adjustedIndex = Math.min(currentSignalIndex, allSignals.length - 1);
+      if (adjustedIndex !== currentSignalIndex && adjustedIndex >= 0) {
+        setCurrentSignalIndex(adjustedIndex);
+      } else if (adjustedIndex >= 0) {
+        setLatestSignal(allSignals[adjustedIndex]);
+      }
+    } else if (allSignals.length === 0) {
+      setLatestSignal(null);
     }
   }, [currentSignalIndex, allSignals, setLatestSignal]);
 

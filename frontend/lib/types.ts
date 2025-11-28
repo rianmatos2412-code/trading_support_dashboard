@@ -47,6 +47,7 @@ export interface ChartSettings {
   showMA25: boolean;
   showMA99: boolean;
   activeIndicators: IndicatorConfig[]; // Dynamic list of active indicators
+  showUnmitigatedOnly: boolean; // Show only signals where price hasn't reached entry
 }
 
 export interface Settings {

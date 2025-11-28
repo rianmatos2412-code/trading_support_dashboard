@@ -74,6 +74,18 @@ export function ChartControls({ onRefreshSwings, isRefreshingSwings }: ChartCont
             Tooltip
           </Label>
         </div>
+        <div className="flex items-center gap-2">
+          <Switch
+            id="show-unmitigated"
+            checked={chartSettings.showUnmitigatedOnly}
+            onCheckedChange={(checked: boolean) =>
+              updateChartSettings({ showUnmitigatedOnly: checked })
+            }
+          />
+          <Label htmlFor="show-unmitigated" className="text-sm cursor-pointer">
+            Unmitigated
+          </Label>
+        </div>
         <Button
           variant="outline"
           size="sm"

@@ -95,6 +95,7 @@ const defaultChartSettings: ChartSettings = {
   showMA25: false,  // Hide MA(25) by default
   showMA99: false,  // Hide MA(99) by default
   activeIndicators: createDefaultIndicators(), // RSI and Volume shown by default
+  showUnmitigatedOnly: false,  // Show all signals by default
 };
 
 export const useMarketStore = createWithEqualityFn<MarketState>((set) => ({
