@@ -244,7 +244,12 @@ export const SignalRow = memo(
         {/* Confluence */}
         <div>
           {signal.confluence ? (
-            <ConfluenceBadges confluence={signal.confluence} />
+            <ConfluenceBadges 
+              confluence={signal.confluence} 
+              confluenceValue={typeof signal.confluence === "string" 
+                ? parseInt(signal.confluence, 10) 
+                : undefined} 
+            />
           ) : (
             <span className="text-muted-foreground/60 text-xs">-</span>
           )}
