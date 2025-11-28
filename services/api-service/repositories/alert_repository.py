@@ -70,7 +70,8 @@ class AlertRepository(BaseRepository):
                 swing_high_timestamp, direction, created_at
             FROM ranked_alerts
             WHERE rn <= 50
-            ORDER BY created_at DESC
+            ORDER BY GREATEST(swing_high_timestamp, swing_low_timestamp) DESC,
+                     created_at DESC
             LIMIT :limit
         """
         params["limit"] = limit
