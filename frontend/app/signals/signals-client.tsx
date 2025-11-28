@@ -14,7 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ArrowLeft, Filter, Search, ArrowUpDown, ArrowUp, ArrowDown, Lock, Unlock } from "lucide-react";
+import { ArrowLeft, Filter, Search, ArrowUpDown, ArrowUp, ArrowDown, Lock, Unlock, Plus, X } from "lucide-react";
 import { SignalList } from "@/components/signals/SignalList";
 import { useSignalsStore } from "@/stores/useSignalsStore";
 import { useSignalFeed } from "@/hooks/useSignalFeed";
@@ -43,8 +43,13 @@ const formatRelative = (timestamp: number | null) => {
   return `${diffHours}h ago`;
 };
 
-type SortField = "name" | "price" | "score";
+type SortField = "swing_timestamp" | "price_score" | "confluence" | "symbol" | "entry_price" | "timestamp";
 type SortDirection = "asc" | "desc";
+
+interface SortOption {
+  field: SortField;
+  direction: SortDirection;
+}
 
 const calculatePriceScore = (currentPrice: number | null | undefined, entryPrice: number): number => {
   if (!currentPrice || currentPrice <= 0 || entryPrice <= 0) return Infinity; // Put missing prices at end
@@ -54,10 +59,17 @@ const calculatePriceScore = (currentPrice: number | null | undefined, entryPrice
 export function SignalsClient({ initialSignals }: SignalsClientProps) {
   const [searchTerm, setSearchTerm] = useState("");
   const [directionFilter, setDirectionFilter] = useState<"all" | "long" | "short">("all");
-  const [minPrice, setMinPrice] = useState<number>(0);
-  const [maxPrice, setMaxPrice] = useState<number>(0);
-  const [sortField, setSortField] = useState<SortField>("score");
-  const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
+  const [sortOptions, setSortOptions] = useState<SortOption[]>([
+    { field: "swing_timestamp", direction: "desc" },
+    { field: "price_score", direction: "asc" },
+    { field: "confluence", direction: "desc" },
+  ]);
+  const [appliedSortOptions, setAppliedSortOptions] = useState<SortOption[]>([
+    { field: "swing_timestamp", direction: "desc" },
+    { field: "price_score", direction: "asc" },
+    { field: "confluence", direction: "desc" },
+  ]);
+  const MAX_SORT_OPTIONS = 3;
   const [isFixed, setIsFixed] = useState(false);
   const [fixedOrder, setFixedOrder] = useState<string[]>([]);
   const setInitialSignals = useSignalsStore((state) => state.setInitialSignals);
@@ -80,11 +92,6 @@ export function SignalsClient({ initialSignals }: SignalsClientProps) {
       if (query && !signal.symbol.toLowerCase().includes(query)) return false;
       if (directionFilter !== "all" && signal.direction !== directionFilter) return false;
       
-      // Filter by current price range
-      const currentPrice = symbols.find((s) => s.symbol === signal.symbol)?.price ?? signal.price ?? 0;
-      if (minPrice > 0 && currentPrice < minPrice) return false;
-      if (maxPrice > 0 && currentPrice > maxPrice) return false;
-      
       return true;
     });
 
@@ -96,57 +103,71 @@ export function SignalsClient({ initialSignals }: SignalsClientProps) {
       return fixedOrder.filter(id => filteredSet.has(id));
     }
 
-    // Multi-sort signals by: MAX(swing_high_timestamp, swing_low_timestamp), price_score, confluence
+    // Multi-sort signals using configurable sort options
     const sorted = [...filtered].sort((aId, bId) => {
       const a = lookup[aId];
       const b = lookup[bId];
       if (!a || !b) return 0;
 
-      // Helper function to get max swing timestamp
+      // Helper functions to get values for sorting
       const getMaxSwingTimestamp = (signal: typeof a): number => {
         const highTs = signal.swing_high_timestamp ? new Date(signal.swing_high_timestamp).getTime() : 0;
         const lowTs = signal.swing_low_timestamp ? new Date(signal.swing_low_timestamp).getTime() : 0;
         return Math.max(highTs, lowTs);
       };
 
-      // Helper function to get price score
       const getPriceScore = (signal: typeof a): number => {
         const entryPrice = signal.entry1 ?? signal.price ?? 0;
         const currentPrice = symbols.find((s) => s.symbol === signal.symbol)?.price ?? null;
         return calculatePriceScore(currentPrice, entryPrice);
       };
 
-      // Helper function to get confluence value
       const getConfluenceValue = (signal: typeof a): number => {
         if (!signal.confluence || typeof signal.confluence !== "string") return 0;
         const value = parseInt(signal.confluence, 10);
         return isNaN(value) ? 0 : value;
       };
 
-      // Sort by: 1) Max swing timestamp (desc - most recent first), 2) Price score (asc - lower is better), 3) Confluence (desc - higher is better)
-      const aMaxSwing = getMaxSwingTimestamp(a);
-      const bMaxSwing = getMaxSwingTimestamp(b);
-      
-      // Primary sort: Max swing timestamp (descending - most recent first)
-      if (aMaxSwing !== bMaxSwing) {
-        return bMaxSwing - aMaxSwing; // Descending
+      const getValue = (signal: typeof a, field: SortField): number | string => {
+        switch (field) {
+          case "swing_timestamp":
+            return getMaxSwingTimestamp(signal);
+          case "price_score":
+            return getPriceScore(signal);
+          case "confluence":
+            return getConfluenceValue(signal);
+          case "symbol":
+            return signal.symbol.toLowerCase();
+          case "entry_price":
+            return signal.entry1 ?? signal.price ?? 0;
+          case "timestamp":
+            return new Date(signal.timestamp).getTime();
+          default:
+            return 0;
+        }
+      };
+
+      // Apply each sort option in order
+      for (const sortOption of appliedSortOptions) {
+        const aValue = getValue(a, sortOption.field);
+        const bValue = getValue(b, sortOption.field);
+
+        if (aValue !== bValue) {
+          if (typeof aValue === "string" && typeof bValue === "string") {
+            const comparison = aValue.localeCompare(bValue);
+            return sortOption.direction === "asc" ? comparison : -comparison;
+          } else {
+            const comparison = (aValue as number) - (bValue as number);
+            return sortOption.direction === "asc" ? comparison : -comparison;
+          }
+        }
       }
 
-      // Secondary sort: Price score (ascending - lower is better)
-      const aPriceScore = getPriceScore(a);
-      const bPriceScore = getPriceScore(b);
-      if (aPriceScore !== bPriceScore) {
-        return aPriceScore - bPriceScore; // Ascending
-      }
-
-      // Tertiary sort: Confluence value (descending - higher is better)
-      const aConfluence = getConfluenceValue(a);
-      const bConfluence = getConfluenceValue(b);
-      return bConfluence - aConfluence; // Descending
+      return 0; // All sort criteria are equal
     });
 
     return sorted;
-  }, [signalIds, searchTerm, directionFilter, minPrice, maxPrice, sortField, sortDirection, symbols, isFixed, fixedOrder]);
+  }, [signalIds, searchTerm, directionFilter, appliedSortOptions, symbols, isFixed, fixedOrder]);
 
   const totalSignals = signalIds.length;
 
@@ -162,64 +183,77 @@ export function SignalsClient({ initialSignals }: SignalsClientProps) {
       if (query && !signal.symbol.toLowerCase().includes(query)) return false;
       if (directionFilter !== "all" && signal.direction !== directionFilter) return false;
       
-      const currentPrice = symbols.find((s) => s.symbol === signal.symbol)?.price ?? signal.price ?? 0;
-      if (minPrice > 0 && currentPrice < minPrice) return false;
-      if (maxPrice > 0 && currentPrice > maxPrice) return false;
-      
       return true;
     });
 
-    // Multi-sort signals by: MAX(swing_high_timestamp, swing_low_timestamp), price_score, confluence
+    // Multi-sort using configurable sort options (same logic as filteredAndSortedIds)
     const sorted = [...filtered].sort((aId, bId) => {
       const a = lookup[aId];
       const b = lookup[bId];
       if (!a || !b) return 0;
 
-      // Helper function to get max swing timestamp
       const getMaxSwingTimestamp = (signal: typeof a): number => {
         const highTs = signal.swing_high_timestamp ? new Date(signal.swing_high_timestamp).getTime() : 0;
         const lowTs = signal.swing_low_timestamp ? new Date(signal.swing_low_timestamp).getTime() : 0;
         return Math.max(highTs, lowTs);
       };
 
-      // Helper function to get price score
       const getPriceScore = (signal: typeof a): number => {
         const entryPrice = signal.entry1 ?? signal.price ?? 0;
         const currentPrice = symbols.find((s) => s.symbol === signal.symbol)?.price ?? null;
         return calculatePriceScore(currentPrice, entryPrice);
       };
 
-      // Helper function to get confluence value
       const getConfluenceValue = (signal: typeof a): number => {
         if (!signal.confluence || typeof signal.confluence !== "string") return 0;
         const value = parseInt(signal.confluence, 10);
         return isNaN(value) ? 0 : value;
       };
 
-      // Sort by: 1) Max swing timestamp (desc - most recent first), 2) Price score (asc - lower is better), 3) Confluence (desc - higher is better)
-      const aMaxSwing = getMaxSwingTimestamp(a);
-      const bMaxSwing = getMaxSwingTimestamp(b);
-      
-      // Primary sort: Max swing timestamp (descending - most recent first)
-      if (aMaxSwing !== bMaxSwing) {
-        return bMaxSwing - aMaxSwing; // Descending
+      const getValue = (signal: typeof a, field: SortField): number | string => {
+        switch (field) {
+          case "swing_timestamp":
+            return getMaxSwingTimestamp(signal);
+          case "price_score":
+            return getPriceScore(signal);
+          case "confluence":
+            return getConfluenceValue(signal);
+          case "symbol":
+            return signal.symbol.toLowerCase();
+          case "entry_price":
+            return signal.entry1 ?? signal.price ?? 0;
+          case "timestamp":
+            return new Date(signal.timestamp).getTime();
+          default:
+            return 0;
+        }
+      };
+
+      for (const sortOption of appliedSortOptions) {
+        const aValue = getValue(a, sortOption.field);
+        const bValue = getValue(b, sortOption.field);
+
+        if (aValue !== bValue) {
+          if (typeof aValue === "string" && typeof bValue === "string") {
+            const comparison = aValue.localeCompare(bValue);
+            return sortOption.direction === "asc" ? comparison : -comparison;
+          } else {
+            const comparison = (aValue as number) - (bValue as number);
+            return sortOption.direction === "asc" ? comparison : -comparison;
+          }
+        }
       }
 
-      // Secondary sort: Price score (ascending - lower is better)
-      const aPriceScore = getPriceScore(a);
-      const bPriceScore = getPriceScore(b);
-      if (aPriceScore !== bPriceScore) {
-        return aPriceScore - bPriceScore; // Ascending
-      }
-
-      // Tertiary sort: Confluence value (descending - higher is better)
-      const aConfluence = getConfluenceValue(a);
-      const bConfluence = getConfluenceValue(b);
-      return bConfluence - aConfluence; // Descending
+      return 0;
     });
 
     return sorted;
-  }, [signalIds, searchTerm, directionFilter, minPrice, maxPrice, symbols]);
+  }, [signalIds, searchTerm, directionFilter, appliedSortOptions, symbols]);
+
+  // Handle apply sort button
+  const handleApplySort = () => {
+    setAppliedSortOptions([...sortOptions]);
+  };
 
   // Handle fixed button toggle
   const handleFixedToggle = () => {
@@ -300,84 +334,96 @@ export function SignalsClient({ initialSignals }: SignalsClientProps) {
               </Select>
             </div>
 
-            <div className="flex items-center gap-2">
-              <Label htmlFor="min-price" className="text-sm">Min Price</Label>
-              <Input
-                id="min-price"
-                type="number"
-                min={0}
-                step="0.01"
-                placeholder="0"
-                value={minPrice || ""}
-                onChange={(event) => setMinPrice(Number(event.target.value) || 0)}
-                className="w-[120px]"
-              />
-            </div>
-
-            <div className="flex items-center gap-2">
-              <Label htmlFor="max-price" className="text-sm">Max Price</Label>
-              <Input
-                id="max-price"
-                type="number"
-                min={0}
-                step="0.01"
-                placeholder="0"
-                value={maxPrice || ""}
-                onChange={(event) => setMaxPrice(Number(event.target.value) || 0)}
-                className="w-[120px]"
-              />
-            </div>
-
-            <div className="flex items-center gap-2">
-              <Label className="text-sm">Sort by</Label>
-              <Select
-                value={sortField}
-                onValueChange={(value) => setSortField(value as SortField)}
-                disabled={isFixed}
-              >
-                <SelectTrigger className="w-[140px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="score">Price Score</SelectItem>
-                  <SelectItem value="price">Current Price</SelectItem>
-                  <SelectItem value="name">Symbol Name</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <Label className="text-sm">Order</Label>
-              <Select
-                value={sortDirection}
-                onValueChange={(value) => setSortDirection(value as SortDirection)}
-                disabled={isFixed}
-              >
-                <SelectTrigger className="w-[100px]">
-                  <div className="flex items-center gap-2">
-                    <SelectValue />
-                    {/* {sortDirection === "asc" ? (
-                      <ArrowUp className="h-3 w-3" />
-                    ) : (
-                      <ArrowDown className="h-3 w-3" />
-                    )} */}
+            {/* Multi-Sort Options */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <Label className="text-sm">Sort:</Label>
+              <div className="flex items-center gap-2 flex-wrap">
+                {sortOptions.map((option, index) => (
+                  <div key={index} className="flex items-center gap-1 border rounded-md px-2 py-1 bg-card">
+                    <span className="text-xs text-muted-foreground">{index + 1}.</span>
+                    <Select
+                      value={option.field}
+                      onValueChange={(value) => {
+                        const newOptions = [...sortOptions];
+                        newOptions[index].field = value as SortField;
+                        setSortOptions(newOptions);
+                      }}
+                      disabled={isFixed}
+                    >
+                      <SelectTrigger className="w-[140px] h-7 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="swing_timestamp">Swing Timestamp</SelectItem>
+                        <SelectItem value="price_score">Price Score</SelectItem>
+                        <SelectItem value="confluence">Confluence</SelectItem>
+                        <SelectItem value="symbol">Symbol</SelectItem>
+                        <SelectItem value="entry_price">Entry Price</SelectItem>
+                        <SelectItem value="timestamp">Signal Timestamp</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Select
+                      value={option.direction}
+                      onValueChange={(value) => {
+                        const newOptions = [...sortOptions];
+                        newOptions[index].direction = value as SortDirection;
+                        setSortOptions(newOptions);
+                      }}
+                      disabled={isFixed}
+                    >
+                      <SelectTrigger className="w-[80px] h-7 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="asc">
+                          <div className="flex items-center gap-1">
+                            <ArrowUp className="h-3 w-3" />
+                            <span>Asc</span>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="desc">
+                          <div className="flex items-center gap-1">
+                            <ArrowDown className="h-3 w-3" />
+                            <span>Desc</span>
+                          </div>
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setSortOptions(sortOptions.filter((_, i) => i !== index));
+                      }}
+                      disabled={isFixed || sortOptions.length === 1}
+                      className="h-7 w-7 p-0"
+                    >
+                      <X className="h-3 w-3" />
+                    </Button>
                   </div>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="asc">
-                    <div className="flex items-center gap-2">
-                      <ArrowUp className="h-3 w-3" />
-                      <span>Asc</span>
-                    </div>
-                  </SelectItem>
-                  <SelectItem value="desc">
-                    <div className="flex items-center gap-2">
-                      <ArrowDown className="h-3 w-3" />
-                      <span>Dsc</span>
-                    </div>
-                  </SelectItem>
-                </SelectContent>
-              </Select>
+                ))}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setSortOptions([...sortOptions, { field: "swing_timestamp", direction: "desc" }]);
+                  }}
+                  disabled={isFixed || sortOptions.length >= MAX_SORT_OPTIONS}
+                  className="h-7 gap-1"
+                >
+                  <Plus className="h-3 w-3" />
+                  <span className="text-xs">Add</span>
+                </Button>
+                <Button
+                  variant="default"
+                  size="sm"
+                  onClick={handleApplySort}
+                  disabled={isFixed}
+                  className="h-7 gap-1"
+                >
+                  Apply
+                </Button>
+              </div>
             </div>
 
             <div className="flex items-center gap-2">
