@@ -52,3 +52,37 @@ export function formatPercent(num: number | null | undefined): string {
   return `${sign}${num.toFixed(2)}%`;
 }
 
+export function formatTimeDelta(timestamp: string | Date | null | undefined): string {
+  if (!timestamp) return "-";
+  const date = typeof timestamp === "string" ? new Date(timestamp) : timestamp;
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffSeconds = Math.floor(diffMs / 1000);
+  const diffMinutes = Math.floor(diffSeconds / 60);
+  const diffHours = Math.floor(diffMinutes / 60);
+  const diffDays = Math.floor(diffHours / 24);
+
+  if (diffSeconds < 60) {
+    return `${diffSeconds}s ago`;
+  } else if (diffMinutes < 60) {
+    return `${diffMinutes}m ago`;
+  } else if (diffHours < 24) {
+    return `${diffHours}h ago`;
+  } else if (diffDays < 7) {
+    return `${diffDays}d ago`;
+  } else {
+    // For older than a week, show weeks, months, or years
+    const diffWeeks = Math.floor(diffDays / 7);
+    const diffMonths = Math.floor(diffDays / 30);
+    const diffYears = Math.floor(diffDays / 365);
+
+    if (diffYears > 0) {
+      return `${diffYears}${diffYears === 1 ? " year" : " years"} ago`;
+    } else if (diffMonths > 0) {
+      return `${diffMonths}${diffMonths === 1 ? " month" : " months"} ago`;
+    } else {
+      return `${diffWeeks}${diffWeeks === 1 ? " week" : " weeks"} ago`;
+    }
+  }
+}
+

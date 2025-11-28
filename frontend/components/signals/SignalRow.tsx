@@ -1,11 +1,11 @@
 "use client";
 
-import { memo, useMemo } from "react";
+import { memo, useMemo, useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { TradingSignal } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { formatPrice, formatTimestamp, cn } from "@/lib/utils";
+import { formatPrice, formatTimestamp, formatTimeDelta, cn } from "@/lib/utils";
 import { TrendingDown, TrendingUp, ArrowRight } from "lucide-react";
 import type { SymbolItem } from "@/components/ui/SymbolManager";
 import { useMarketStore } from "@/stores/useMarketStore";
@@ -56,6 +56,33 @@ export const SignalRow = memo(
     const swingLow = signal.swing_low ?? null;
     const swingHighTimestamp = signal.swing_high_timestamp ? formatTimestamp(signal.swing_high_timestamp) : null;
     const swingLowTimestamp = signal.swing_low_timestamp ? formatTimestamp(signal.swing_low_timestamp) : null;
+    
+    // Real-time time delta updates
+    const [now, setNow] = useState(() => new Date());
+    
+    useEffect(() => {
+      const interval = setInterval(() => {
+        setNow(new Date());
+      }, 1000); // Update every second
+      
+      return () => clearInterval(interval);
+    }, []);
+    
+    const swingHighTimeDelta = useMemo(() => {
+      if (!signal.swing_high_timestamp) return null;
+      const timestamp = typeof signal.swing_high_timestamp === "string" 
+        ? new Date(signal.swing_high_timestamp) 
+        : signal.swing_high_timestamp;
+      return formatTimeDelta(timestamp);
+    }, [signal.swing_high_timestamp, now]);
+    
+    const swingLowTimeDelta = useMemo(() => {
+      if (!signal.swing_low_timestamp) return null;
+      const timestamp = typeof signal.swing_low_timestamp === "string" 
+        ? new Date(signal.swing_low_timestamp) 
+        : signal.swing_low_timestamp;
+      return formatTimeDelta(timestamp);
+    }, [signal.swing_low_timestamp, now]);
 
     const handleViewChart = async (e: React.MouseEvent) => {
       e.stopPropagation(); // Prevent any parent click handlers
@@ -176,8 +203,13 @@ export const SignalRow = memo(
           {swingHigh !== null ? (
             <div>
               <p className="font-mono text-sm text-emerald-400/90">{formatPrice(swingHigh)}</p>
+              {swingHighTimeDelta && (
+                <p className="text-[10px] font-medium text-muted-foreground/80 mt-0.5" title={swingHighTimestamp || undefined}>
+                  {swingHighTimeDelta}
+                </p>
+              )}
               {swingHighTimestamp && (
-                <p className="text-[9px] text-muted-foreground/70 mt-0.5">{swingHighTimestamp}</p>
+                <p className="text-[9px] text-muted-foreground/60 mt-0.5">{swingHighTimestamp}</p>
               )}
             </div>
           ) : (
@@ -190,8 +222,13 @@ export const SignalRow = memo(
           {swingLow !== null ? (
             <div>
               <p className="font-mono text-sm text-red-400/90">{formatPrice(swingLow)}</p>
+              {swingLowTimeDelta && (
+                <p className="text-[10px] font-medium text-muted-foreground/80 mt-0.5" title={swingLowTimestamp || undefined}>
+                  {swingLowTimeDelta}
+                </p>
+              )}
               {swingLowTimestamp && (
-                <p className="text-[9px] text-muted-foreground/70 mt-0.5">{swingLowTimestamp}</p>
+                <p className="text-[9px] text-muted-foreground/60 mt-0.5">{swingLowTimestamp}</p>
               )}
             </div>
           ) : (
