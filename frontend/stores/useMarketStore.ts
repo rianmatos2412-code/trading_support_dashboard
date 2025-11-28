@@ -54,7 +54,7 @@ const defaultChartSettings: ChartSettings = {
   showSR: false,  // Hide Support/Resistance by default
   showSwings: true,  // Always show Swing High/Low
   showEntrySLTP: true,  // Always show Entry/SL/TP
-  showRSI: false,  // Hide RSI by default
+  showRSI: true,  // Show RSI by default
   rsiHeight: 20,  // RSI takes 20% of chart height by default
   showTooltip: true,  // Show tooltip by default
   showMA7: false,  // Hide MA(7) by default
