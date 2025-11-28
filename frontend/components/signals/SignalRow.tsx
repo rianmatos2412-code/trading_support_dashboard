@@ -164,8 +164,13 @@ export const SignalRow = memo(
 
         {/* Stop Loss */}
         <div className="text-right">
-          {stopLoss !== null ? (
-            <p className="font-mono text-sm text-red-400/90">{formatPrice(stopLoss)}</p>
+          {stopLoss !== null && entryPrice > 0 ? (
+            <div>
+              <p className="font-mono text-sm text-red-400/90">{formatPrice(stopLoss)}</p>
+              <p className="text-[10px] text-red-400/70 mt-0.5">
+                {((stopLoss - entryPrice) / entryPrice * 100).toFixed(2)}%
+              </p>
+            </div>
           ) : (
             <span className="text-muted-foreground/60 text-xs">-</span>
           )}
@@ -173,8 +178,13 @@ export const SignalRow = memo(
 
         {/* TP1 */}
         <div className="text-right">
-          {signal.tp1 ? (
-            <p className="font-mono text-sm text-emerald-400/90">{formatPrice(signal.tp1)}</p>
+          {signal.tp1 && entryPrice > 0 ? (
+            <div>
+              <p className="font-mono text-sm text-emerald-400/90">{formatPrice(signal.tp1)}</p>
+              <p className="text-[10px] text-emerald-400/70 mt-0.5">
+                {((signal.tp1 - entryPrice) / entryPrice * 100).toFixed(2)}%
+              </p>
+            </div>
           ) : (
             <span className="text-muted-foreground/60 text-xs">-</span>
           )}
@@ -182,8 +192,13 @@ export const SignalRow = memo(
 
         {/* TP2 */}
         <div className="text-right">
-          {signal.tp2 ? (
-            <p className="font-mono text-sm text-emerald-500/90">{formatPrice(signal.tp2)}</p>
+          {signal.tp2 && entryPrice > 0 ? (
+            <div>
+              <p className="font-mono text-sm text-emerald-500/90">{formatPrice(signal.tp2)}</p>
+              <p className="text-[10px] text-emerald-500/70 mt-0.5">
+                {((signal.tp2 - entryPrice) / entryPrice * 100).toFixed(2)}%
+              </p>
+            </div>
           ) : (
             <span className="text-muted-foreground/60 text-xs">-</span>
           )}
@@ -191,8 +206,13 @@ export const SignalRow = memo(
 
         {/* TP3 */}
         <div className="text-right">
-          {signal.tp3 ? (
-            <p className="font-mono text-sm text-emerald-600/90">{formatPrice(signal.tp3)}</p>
+          {signal.tp3 && entryPrice > 0 ? (
+            <div>
+              <p className="font-mono text-sm text-emerald-600/90">{formatPrice(signal.tp3)}</p>
+              <p className="text-[10px] text-emerald-600/70 mt-0.5">
+                {((signal.tp3 - entryPrice) / entryPrice * 100).toFixed(2)}%
+              </p>
+            </div>
           ) : (
             <span className="text-muted-foreground/60 text-xs">-</span>
           )}

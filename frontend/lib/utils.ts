@@ -15,11 +15,13 @@ export function formatPrice(price: number | null | undefined): string {
 
 export function formatTimestamp(timestamp: string | Date): string {
   const date = typeof timestamp === "string" ? new Date(timestamp) : timestamp;
+  // Ensure we're using local timezone (Date objects automatically convert UTC to local)
   return new Intl.DateTimeFormat("en-US", {
     month: "short",
     day: "numeric",
     hour: "2-digit",
     minute: "2-digit",
+    hour12: true, // Use 12-hour format with AM/PM
   }).format(date);
 }
 
